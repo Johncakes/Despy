@@ -69,6 +69,30 @@ describe('validateGradeRequest', () => {
     expect(validateGradeRequest(broken)).toMatch(/1\.0/);
   });
 
+  it('합은 1이어도 각 weight가 [0,1] 밖이면 차단한다 ({tests:2, rubric:-1})', () => {
+    const broken = {
+      ...validRequest,
+      rubric: { ...validRequest.rubric, weights: { tests: 2, rubric: -1 } },
+    };
+    expect(validateGradeRequest(broken)).toMatch(/0 이상 1 이하/);
+  });
+
+  it('NaN weight를 차단한다 (typeof number 통과 우회 방지)', () => {
+    const broken = {
+      ...validRequest,
+      rubric: { ...validRequest.rubric, weights: { tests: NaN, rubric: NaN } },
+    };
+    expect(validateGradeRequest(broken)).toMatch(/0 이상 1 이하/);
+  });
+
+  it('빈 루브릭(criteria:[])을 차단한다', () => {
+    const broken = {
+      ...validRequest,
+      rubric: { ...validRequest.rubric, criteria: [] },
+    };
+    expect(validateGradeRequest(broken)).toMatch(/criteria/);
+  });
+
   it('부동소수 오차(0.7+0.3) 범위는 허용한다', () => {
     const ok = {
       ...validRequest,

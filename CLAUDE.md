@@ -72,7 +72,8 @@ npm run test         # vitest 실행
 src/
 ├── app/                          Next.js App Router (라우팅만 — 로직 없음)
 │   ├── page.tsx                  홈 (역할 진입 + 과제/구 문제 목록)
-│   ├── author/page.tsx           교수 출제 화면 진입점
+│   ├── author/page.tsx           교수 출제 화면 진입점 (구 알고리즘 — P5 정리 예정)
+│   ├── author/challenge/page.tsx 교수 과제 출제 화면 진입점 (워크스페이스 — 피벗 P4)
 │   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (구 알고리즘 — P5 정리 예정)
 │   ├── workspace/[challengeId]/page.tsx 학생 과제 풀이(워크스페이스) 진입점 (피벗 P1)
 │   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
@@ -82,8 +83,10 @@ src/
 │       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백, 구 — P5 제거 예정)
 │
 ├── features/                     도메인별 기능 모듈 (세로 슬라이스)
-│   ├── author/                   교수: AuthorView, ProblemForm, TestCaseEditor,
-│   │                             AiPolicyFields, useProblemDraft
+│   ├── author/                   교수(구 알고리즘): AuthorView, ProblemForm, TestCaseEditor,
+│   │                             AiPolicyFields(공용), useProblemDraft
+│   │                             + (피벗 P4) ChallengeAuthorView, useChallengeDraft, components/
+│   │                               ChallengeForm·FileSetEditor(프리셋·잠금 토글)·RubricEditor
 │   └── solve/                    학생(구 알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
 │                                 GradingResultPanel
 │                                 + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,

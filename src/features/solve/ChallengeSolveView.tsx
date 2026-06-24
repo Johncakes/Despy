@@ -10,8 +10,9 @@
  * 보내(useGradeChallenge) 공식 채점을 받고, 결과를 모달(ChallengeGradingResultPanel)로
  * 보여준다. testResult가 없으면 제출 전에 runTests()를 먼저 돌려 자동 테스트 신호를 채운다.
  *
- * ⚠️ AI 사용량(질문/토큰)은 P1에서 in-memory 상태로 추적한다(새로고침 시 초기화).
- *    파일 버퍼 영속(despy-workspace)은 P4에서 도입한다(docs/spec-webcontainer.md).
+ * 영속(P4): 파일 편집 버퍼(델타)와 AI 사용량(질문/토큰)은 useWorkspace를 통해
+ *    challengeId별로 IndexedDB(despy-workspace)에 저장·복원된다 — 새로고침해도
+ *    진행이 유지된다(docs/spec-webcontainer.md §9.1).
  *
  * 사용처: app/workspace/[challengeId]/page.tsx
  */
@@ -58,13 +59,17 @@ function collectChangedFiles(
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem }) {
-  const workspace = useWorkspace(challenge.template, challenge.lockedPaths);
+  const workspace = useWorkspace(
+    challenge.template,
+    challenge.lockedPaths,
+    challenge.id,
+  );
   const { writeFile, activePath, files, testResult, runTests } = workspace;
+  // AI 사용량은 워크스페이스(영속, P4)에서 읽는다 — 새로고침해도 유지된다.
+  const { questionsUsed, tokensUsed, recordAiTurn } = workspace;
   const grade = useGradeChallenge();
 
-  // AI 사용량(P1 in-memory) · 패널 토글 상태
-  const [questionsUsed, setQuestionsUsed] = useState(0);
-  const [tokensUsed, setTokensUsed] = useState(0);
+  // 패널 토글 상태(UI 전용 — 영속 대상 아님)
   const [isAiOpen, setIsAiOpen] = useState(true);
   const [isDirectEditEnabled, setIsDirectEditEnabled] = useState(true);
   const [isAiWriting, setIsAiWriting] = useState(false);
@@ -97,10 +102,12 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     setIsAiWriting(false);
   }, []);
 
-  const handleTurnComplete = useCallback((totalTokens: number) => {
-    setQuestionsUsed((count) => count + 1);
-    setTokensUsed((total) => total + totalTokens);
-  }, []);
+  const handleTurnComplete = useCallback(
+    (totalTokens: number) => {
+      recordAiTurn(totalTokens);
+    },
+    [recordAiTurn],
+  );
 
   const handleSubmit = useCallback(async () => {
     setSubmitError(null);

@@ -34,6 +34,11 @@ export function validateGradeRequest(body: unknown): string | null {
   if (!isRecord(rubric) || !Array.isArray(rubric.criteria)) {
     return 'rubric.criteria가 필요합니다.';
   }
+  // 빈 루브릭은 maxScore 0이라 루브릭 기여가 항상 0이 된다(채점이 무의미). 출제 실수로
+  // 보고 채점 전에 거부한다.
+  if (rubric.criteria.length === 0) {
+    return 'rubric.criteria가 비어 있습니다. 최소 1개 항목이 필요합니다.';
+  }
 
   if (!isRecord(body.submittedFiles)) return 'submittedFiles가 필요합니다.';
 
@@ -47,6 +52,11 @@ export function validateGradeRequest(body: unknown): string | null {
   const rubricWeight = weights?.rubric;
   if (typeof tests !== 'number' || typeof rubricWeight !== 'number') {
     return 'rubric.weights(tests·rubric)가 필요합니다.';
+  }
+  // 각 가중치를 [0,1]로 점검한다. 합(≈1.0)만 보면 {tests:2, rubric:-1}이나 NaN
+  // 조합이 통과해 finalScore가 왜곡되므로, 합 검사보다 먼저 범위를 막는다.
+  if (!isWeightInRange(tests) || !isWeightInRange(rubricWeight)) {
+    return 'rubric.weights의 각 값은 0 이상 1 이하여야 합니다.';
   }
   if (Math.abs(tests + rubricWeight - 1) > WEIGHTS_SUM_TOLERANCE) {
     return 'rubric.weights 합은 1.0이어야 합니다.';
@@ -68,4 +78,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+/** 가중치가 유한수이며 [0,1] 범위인지 (NaN·Infinity·음수·1 초과 거부). */
+function isWeightInRange(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
 }

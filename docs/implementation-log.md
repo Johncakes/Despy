@@ -14,7 +14,7 @@
 | **P1** | 편집/AI 미러링 → FS → HMR + 실제 풀이 화면 | ✅ 완료·검증 (`/playground` + `/workspace/[id]`) |
 | **P2** | WebContainer 내 `npm test` 결과 캡처 | ✅ 완료 (테스트 탭·`runTests`·vitest 템플릿) |
 | **P3** | AI 루브릭 채점 + 가중합 | 🟡 백엔드·데이터 ✅ / **제출 UI 미연결** |
-| **P4** | 출제 도구 + 제출 플로우 + 워크스페이스 persist | ❌ 미착수 |
+| **P4** | 출제 도구 + 제출 플로우 + 워크스페이스 persist | 🟡 출제 도구 ✅ / 워크스페이스 persist 미착수 |
 | **P5** | 구 Judge0/Problem 경로 제거 | ❌ 미착수 |
 
 **핵심 방향 변경(2026-06-24)**: 백엔드 최소화 원칙 **해제**. 채점 무결성을 위해 공식 점수는
@@ -219,8 +219,12 @@ src/
 - 제출 시 `testFiles` FS 주입 → `runTests()`로 `AutoTestResult` 수집 후 요청에 첨부
 
 ### P4 — 출제 도구 + 워크스페이스 영속
-- `ChallengeAuthorView`(템플릿·잠금경로·테스트·루브릭·AI정책 출제) — 프리셋 + 파일 단위 편집(§13 결정4)
-- `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — 현재 in-memory 버퍼 대체
+- ✅ `ChallengeAuthorView`(템플릿·잠금경로·테스트·루브릭·AI정책 출제) — 프리셋 + 파일 단위
+  편집/추가/잠금 토글(§13 결정4). 새 라우트 `/author/challenge`, 홈에서 진입. challengeStore CRUD
+  (`upsertChallenge`/`deleteChallenge`) 사용 — persist 스키마(`despy-challenges` v1) 변경 없음.
+  구성: `features/author/ChallengeAuthorView`·`useChallengeDraft`·components/`ChallengeForm`·
+  `FileSetEditor`(파일 세트 편집기·잠금 토글)·`RubricEditor`(+ `AiPolicyFields` 재사용).
+- ⬜ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — 현재 in-memory 버퍼 대체 (미착수)
 
 ### P5 — 구 경로 정리
 - `/api/judge`·`judgeApi`·`judgeQueries`·`GradingRequest`·`docker-compose.judge0.yml`·

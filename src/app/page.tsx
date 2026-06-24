@@ -28,8 +28,11 @@ export default function HomePage() {
         <Title>despy</Title>
         <Subtitle>에이전틱 코딩 평가 시스템 — 통제된 AI로 알고리즘 문제 풀기</Subtitle>
         <HeaderActions>
+          <Link href="/author/challenge">
+            <Button variant="primary">교수 모드 — 과제 출제</Button>
+          </Link>
           <Link href="/author">
-            <Button variant="primary">교수 모드 — 문제 출제</Button>
+            <Button variant="ghost">(구) 알고리즘 문제 출제</Button>
           </Link>
           <Link href="/playground">
             <Button variant="ghost">WebContainer PoC →</Button>

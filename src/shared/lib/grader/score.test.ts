@@ -88,3 +88,54 @@ describe('computeFinalScore', () => {
     expect(computeFinalScore(autoTest, fullRubric, rubric.weights)).toBe(100);
   });
 });
+
+// LLM 출력·요청 페이로드가 망가져도 점수 함수가 NaN/크래시/범위 밖을 내지 않아야
+// 하므로(점수 무결성), 경계·악성 입력을 직접 방어하는지 검증한다.
+describe('점수 무결성 방어 케이스', () => {
+  const fullRubricResult = normalizeRubricResult(
+    {
+      scores: [
+        { criterionId: 'c1', score: 10, reason: '' },
+        { criterionId: 'c2', score: 5, reason: '' },
+      ],
+      feedback: '',
+    },
+    rubric,
+  );
+
+  it('NaN 점수는 0으로 정규화한다', () => {
+    const result = normalizeRubricResult(
+      { scores: [{ criterionId: 'c1', score: NaN, reason: '비정상' }], feedback: '' },
+      rubric,
+    );
+    expect(result.scores[0].score).toBe(0);
+  });
+
+  it('빈 루브릭은 분모 0이라 루브릭 기여가 0이다(크래시 없음)', () => {
+    const emptyRubric: GradingRubric = {
+      criteria: [],
+      weights: { tests: 0.5, rubric: 0.5 },
+    };
+    const emptyResult = normalizeRubricResult({ scores: [], feedback: '' }, emptyRubric);
+    const autoTest: AutoTestResult = { passedCount: 0, totalCount: 0, cases: [] };
+    // tests 0% + rubric 0%(maxScore 0) → 0
+    expect(computeFinalScore(autoTest, emptyResult, emptyRubric.weights)).toBe(0);
+  });
+
+  it('과가중(합>1) weights여도 최종 점수를 100으로 클램프한다', () => {
+    const autoTest: AutoTestResult = { passedCount: 4, totalCount: 4, cases: [] };
+    // 1*1 + 1*1 = 2 → clamp(…,0,1) → 100. (검증이 이런 weights를 거부하지만 함수도 독립적으로 안전)
+    expect(
+      computeFinalScore(autoTest, fullRubricResult, { tests: 1, rubric: 1 }),
+    ).toBe(100);
+  });
+
+  it('0.5 경계는 반올림 올림한다(12.5 → 13)', () => {
+    const autoTest: AutoTestResult = { passedCount: 1, totalCount: 4, cases: [] };
+    const zeroRubric = normalizeRubricResult({ scores: [], feedback: '' }, rubric);
+    // tests 25% * 0.5 + rubric 0% * 0.5 = 0.125 → 12.5 → round → 13
+    expect(
+      computeFinalScore(autoTest, zeroRubric, { tests: 0.5, rubric: 0.5 }),
+    ).toBe(13);
+  });
+});
