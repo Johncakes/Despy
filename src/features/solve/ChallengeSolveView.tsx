@@ -19,7 +19,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import styled, { css } from 'styled-components';
 import type {
   ChallengeGradingResult,
@@ -59,6 +59,7 @@ function collectChangedFiles(
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem }) {
+  const router = useRouter();
   const workspace = useWorkspace(
     challenge.template,
     challenge.lockedPaths,
@@ -77,6 +78,34 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   // 제출/채점(P3) 상태 — 결과 모달과 제출 에러.
   const [gradingResult, setGradingResult] = useState<ChallengeGradingResult | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ── 이탈 방지 (WebContainer 재설치 방지) ─────────────────────────────────
+  // WebContainer가 준비된(또는 준비 중인) 상태에서 페이지를 새로고침하거나 탭을
+  // 닫으면 node_modules가 사라져 재진입 시 npm install이 다시 돌아간다. 실수로
+  // 이탈하는 것을 막기 위해 beforeunload 확인 대화상자를 건다.
+  useEffect(() => {
+    if (workspace.phase === 'idle') return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [workspace.phase]);
+
+  // ← 목록 뒤로가기 시 확인 대화상자. WebContainer가 활성이면 나가면 재설치해야
+  // 함을 알려준다. 확인하면 클라이언트 라우팅으로 이동(WebContainer는 언마운트).
+  const handleBackToList = useCallback(() => {
+    if (
+      workspace.phase !== 'idle' &&
+      workspace.phase !== 'error' &&
+      !window.confirm(
+        '목록으로 나가면 워크스페이스를 다시 준비해야 합니다.\n계속하시겠습니까?',
+      )
+    ) {
+      return;
+    }
+    router.push('/');
+  }, [workspace.phase, router]);
 
   // 미러링 콜백을 안정화(useCallback)해 AiChatPanel의 미러링 effect가 매 렌더
   // 재실행되지 않게 한다. 활성 파일 경로는 ref로 읽어 콜백을 재생성하지 않는다.
@@ -150,7 +179,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   return (
     <Wrapper>
       <TopBar>
-        <BackLink href="/">← 목록</BackLink>
+        <BackButton type="button" onClick={handleBackToList}>← 목록</BackButton>
         <Title>{challenge.title}</Title>
         {submitError && <ErrorText title={submitError}>{submitError}</ErrorText>}
         {!isAiOpen && (
@@ -243,9 +272,18 @@ const TopBar = styled.header`
   gap: ${({ theme }) => theme.spacing.md};
 `;
 
-const BackLink = styled(Link)`
+const BackButton = styled.button`
   font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.textMuted};
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.text};
+  }
 `;
 
 const Title = styled.h1`

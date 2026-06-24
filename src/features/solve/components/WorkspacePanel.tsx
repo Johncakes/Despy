@@ -31,6 +31,42 @@ const PHASE_META: Record<WorkspacePhase, { label: string; tone: BadgeTone }> = {
   error: { label: '오류', tone: 'danger' },
 };
 
+/** 부팅 시퀀스 단계 정의 — 프로그레스 표시용 */
+const BOOT_STEPS: { phase: WorkspacePhase; label: string; estimate?: string }[] = [
+  { phase: 'booting', label: 'WebContainer 부팅', estimate: '~2초' },
+  { phase: 'mounting', label: '파일 mount', estimate: '~1초' },
+  { phase: 'installing', label: 'npm install', estimate: '~15초' },
+  { phase: 'starting', label: 'dev 서버 시작', estimate: '~3초' },
+];
+
+/** 부팅 시퀀스에서 각 단계의 순서 인덱스 (진행률 계산용) */
+const PHASE_ORDER: Partial<Record<WorkspacePhase, number>> = {
+  booting: 0,
+  mounting: 1,
+  installing: 2,
+  starting: 3,
+  ready: 4,
+};
+
+type StepState = 'done' | 'active' | 'pending';
+
+/** 현재 phase에 따라 특정 step이 완료/진행중/대기 중 어느 상태인지 반환 */
+function getStepState(currentPhase: WorkspacePhase, stepPhase: WorkspacePhase): StepState {
+  const current = PHASE_ORDER[currentPhase] ?? -1;
+  const step = PHASE_ORDER[stepPhase] ?? -1;
+  if (step < current) return 'done';
+  if (step === current) return 'active';
+  return 'pending';
+}
+
+/** 현재 phase에 따른 전체 진행률(0~100%) */
+function getProgressPercent(phase: WorkspacePhase): number {
+  const order = PHASE_ORDER[phase];
+  if (order === undefined) return 0;
+  // 4단계(0~3) + ready(4) → 0, 25, 50, 75, 100
+  return Math.min(Math.round((order / 4) * 100), 100);
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 type WorkspaceTab = 'preview' | 'console' | 'test';
@@ -125,8 +161,25 @@ export function WorkspacePanel({
                 </>
               ) : (
                 <>
-                  <Spinner />
-                  <StatusTitle>{meta.label}</StatusTitle>
+                  <ProgressSteps>
+                    {BOOT_STEPS.map((step) => {
+                      const stepState = getStepState(phase, step.phase);
+                      return (
+                        <Step key={step.phase} $state={stepState}>
+                          <StepIndicator $state={stepState}>
+                            {stepState === 'done' ? '✓' : stepState === 'active' ? <StepSpinner /> : <StepDot />}
+                          </StepIndicator>
+                          <StepLabel $state={stepState}>{step.label}</StepLabel>
+                          {stepState === 'active' && step.estimate && (
+                            <StepEstimate>{step.estimate}</StepEstimate>
+                          )}
+                        </Step>
+                      );
+                    })}
+                  </ProgressSteps>
+                  <ProgressBarTrack>
+                    <ProgressBarFill $percent={getProgressPercent(phase)} />
+                  </ProgressBarTrack>
                   <StatusHint>처음 부팅과 의존성 설치에는 시간이 걸립니다.</StatusHint>
                 </>
               )}
@@ -410,4 +463,103 @@ const CaseMessage = styled.pre`
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+`;
+
+// ── 프로그레스 스텝 ─────────────────────────────────────────────────────────
+
+const ProgressSteps = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  width: 100%;
+  max-width: 320px;
+`;
+
+const Step = styled.div<{ $state: StepState }>`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  opacity: ${({ $state }) => ($state === 'pending' ? 0.4 : 1)};
+  transition: opacity 0.3s ease;
+`;
+
+const StepIndicator = styled.div<{ $state: StepState }>`
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+  color: ${({ theme, $state }) =>
+    $state === 'done' ? theme.colors.background : theme.colors.textMuted};
+  background: ${({ theme, $state }) =>
+    $state === 'done'
+      ? theme.colors.success
+      : $state === 'active'
+        ? 'transparent'
+        : theme.colors.surfaceAlt};
+  border: 2px solid
+    ${({ theme, $state }) =>
+      $state === 'done'
+        ? theme.colors.success
+        : $state === 'active'
+          ? theme.colors.primary
+          : theme.colors.border};
+  transition: all 0.3s ease;
+`;
+
+const StepSpinner = styled.div`
+  width: 10px;
+  height: 10px;
+  border: 2px solid ${({ theme }) => theme.colors.border};
+  border-top-color: ${({ theme }) => theme.colors.primary};
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+`;
+
+const StepDot = styled.div`
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.border};
+`;
+
+const StepLabel = styled.span<{ $state: StepState }>`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ $state }) => ($state === 'active' ? 600 : 400)};
+  color: ${({ theme, $state }) =>
+    $state === 'active' ? theme.colors.text : theme.colors.textMuted};
+`;
+
+const StepEstimate = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  margin-left: auto;
+`;
+
+const ProgressBarTrack = styled.div`
+  width: 100%;
+  max-width: 320px;
+  height: 4px;
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: ${({ theme }) => theme.spacing.sm};
+`;
+
+const ProgressBarFill = styled.div<{ $percent: number }>`
+  height: 100%;
+  width: ${({ $percent }) => $percent}%;
+  background: ${({ theme }) => theme.colors.primary};
+  border-radius: 2px;
+  transition: width 0.5s ease;
 `;
