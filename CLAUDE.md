@@ -11,13 +11,19 @@ AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문
 교수는 문제·테스트케이스를 출제하고 AI 정책(모델 고정·질문 횟수·토큰·시스템 프롬프트)을 통제하며,
 학생은 제한된 자원 안에서 AI 에이전트를 활용해 코드를 작성·제출하고 Judge0로 자동 채점받는다.
 
-핵심 도메인(향후 `features/`에 구현 — 현재는 초기 세팅 단계):
-- **교수**: 문제 출제, AI 에이전트 정책 설정, 응시/채점 관리
-- **학생**: 코드 에디터(Monaco), 제한된 AI 대화, 코드 제출·채점 결과 확인
-- **채점**: Judge0(Docker, 격리 실행) 연동 자동 채점
-- **AI 계층**: 교수 설정 모델·시스템 프롬프트 주입, 질문 횟수·토큰 한도 강제
+핵심 도메인 (MVP 구현됨):
+- **교수** (`features/author`): 문제 출제 + AI 정책 설정 (모델·질문/토큰 한도·시스템 프롬프트)
+- **학생** (`features/solve`): 문제 지문 + Monaco 에디터 + 제한된 AI 대화 + 제출·채점 결과
+- **채점** (`app/api/judge`): Judge0 프록시 — `JUDGE0_URL` 없으면 모의(mock) 채점으로 폴백
+- **AI 계층** (`app/api/agent`): Gemini 프록시 — 키 은닉 + 시스템 프롬프트 주입 + 출력 토큰 한도
 
-> 상세 명세는 별도 기획 문서 참조. 본 저장소는 **도메인 비의존 스타터 세팅** 상태입니다.
+> 상세 명세는 별도 기획 문서 참조.
+>
+> **MVP 범위/한계** (확정):
+> - 인증·교수/학생 권한 분리·다중 사용자 동시성은 **미구현**(범위 밖).
+> - 문제·AI정책·풀이 세션은 **localStorage**(Zustand persist)에 저장 — 별도 DB 없음.
+>   따라서 시스템 프롬프트 비밀성·질문/토큰 한도는 **UX 수준**이며 변조 불가능한
+>   보안 수준은 아니다(무서버세션 한계). 백엔드는 키 은닉·프록시 용도로만 최소 사용.
 
 ### 🧭 아키텍처 방향 (확정)
 
@@ -43,9 +49,12 @@ npm run test         # vitest 실행
 # git commit 시 husky가 자동으로 tsc + lint 실행 (lint-staged)
 ```
 
-- **배포**: 미정 (Judge0는 Docker 기반 별도 배포 필요)
+- **환경 변수**: `.env.local`에 `GEMINI_API_KEY` 필요(AI). `JUDGE0_URL`은 선택(없으면 모의 채점).
+  자세히는 `.env.example` / `docs/judge0.md`.
+- **배포**: 미정 (Judge0는 Docker 기반 별도 배포 필요 — `docker-compose.judge0.yml`)
 - **기술 스택**: Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query
-  - _(MongoDB는 지양 — 위 「아키텍처 방향」 참조. 도입 시 별도 논의)_
+  · Monaco Editor(`@monaco-editor/react`) · Vercel AI SDK(`ai` + `@ai-sdk/google`, Gemini) · react-markdown
+  - _(MongoDB는 지양 — 위 「아키텍처 방향」 참조. 현재 코드 미사용. 도입 시 별도 논의)_
 
 ---
 
@@ -55,26 +64,35 @@ npm run test         # vitest 실행
 
 ```
 src/
-├── app/                    Next.js App Router (라우팅만 — 로직 없음)
+├── app/                          Next.js App Router (라우팅만 — 로직 없음)
+│   ├── page.tsx                  홈 (역할 진입 + 문제 목록)
+│   ├── author/page.tsx           교수 출제 화면 진입점
+│   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점
+│   └── api/                      유일한 백엔드 (키 은닉·프록시)
+│       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage)
+│       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백)
 │
-├── features/               도메인별 기능 모듈 (세로 슬라이스)
-│   └── {feature}/          View, store, 기능 전용 훅/유틸
+├── features/                     도메인별 기능 모듈 (세로 슬라이스)
+│   ├── author/                   교수: AuthorView, ProblemForm, TestCaseEditor,
+│   │                             AiPolicyFields, useProblemDraft
+│   └── solve/                    학생: SolveView, ProblemPanel, CodeEditorPanel,
+│                                 AiChatPanel, GradingResultPanel
 │
-└── shared/                 공유 레이어 (4개 그룹)
-    ├── core/               데이터 & 상태
-    │   ├── api/            *Api.ts (데이터 접근 격리 — fetch/DB 호출은 여기에만)
-    │   ├── stores/         *Store.ts (Zustand — 클라이언트/UI 상태)
-    │   ├── queries/        *Queries.ts (TanStack Query 훅 + queryKeys)
-    │   ├── types/          공유 타입 (단일 출처)
-    │   └── constants/      상수, 테마 토큰
-    ├── lib/                재사용 로직
-    │   ├── db/             mongodb.ts (연결 싱글턴)
-    │   ├── utils/          logger, 파서 등
-    │   └── hooks/          범용 훅
-    ├── components/         모든 UI 컴포넌트
-    │   ├── ui/             기본 UI (Button 등)
-    │   └── providers/      AppProviders, ThemeProvider, QueryProvider, styled 레지스트리
-    └── reader/             앱 진입점 오케스트레이터 (features 의존 허용 — 유일한 예외)
+└── shared/                       공유 레이어 (4개 그룹)
+    ├── core/                     데이터 & 상태
+    │   ├── api/                  judgeApi.ts (채점 fetch 격리)
+    │   ├── stores/               problemStore.ts, solveSessionStore.ts (Zustand persist)
+    │   ├── queries/              judgeQueries.ts (채점 mutation), queryKeys.ts
+    │   ├── types/                index.ts (Problem, AiPolicy, TestCase, GradingResult …)
+    │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleProblems.ts
+    ├── lib/                      재사용 로직
+    │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
+    │   ├── utils/                logger.ts
+    │   └── hooks/                useHasMounted.ts (hydration 가드)
+    ├── components/               모든 UI 컴포넌트
+    │   ├── ui/                   Button, Panel, Badge, Markdown, QuotaMeter, Field, PageShell
+    │   └── providers/            AppProviders, ThemeProvider, QueryProvider, styled 레지스트리
+    └── reader/                   앱 진입점 오케스트레이터 (features 의존 허용 — 유일한 예외, 현재 미사용)
 ```
 
 ### 레이어 규칙 (단방향 의존 — 이 프로젝트의 핵심)
@@ -123,9 +141,17 @@ interface ListProps {
 - Query key는 배열 팩토리로 중앙화: `queryKeys.{domain}.detail(id)` (`shared/core/queries/queryKeys.ts`)
 - _(MongoDB 사용 시에만)_ **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — 단 본 프로젝트는 DB/백엔드 최소화 방향이므로 새 코드에서 기본 채택하지 않는다
 
+**현재 구현**
+- 서버 데이터: 채점은 **mutation**(`useGradeSubmission`, `shared/core/queries/judgeQueries.ts`).
+  단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
+  AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
+- 클라이언트 상태: `problemStore`(문제/AI정책 CRUD), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
+- 현재 persist key: `problemStore → 'despy-problems'` (v1), `solveSessionStore → 'despy-solve-session'` (v1)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
+- persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지)
 
 ---
 
