@@ -1,0 +1,81 @@
+/**
+ * submissionStore.ts — 학생 제출(채점 결과) 보관 스토어 (교수 대시보드 데이터 소스)
+ *
+ * 학생이 풀이 화면에서 제출해 받은 공식 채점 결과(ChallengeGradingResult)를 과제별로
+ * 모아 둔다. 교수 채점 대시보드(GradingDashboardView)가 이 스토어를 읽어 제출 목록·
+ * 점수를 보여준다. 제출 결과는 파일트리가 없어(점수·루브릭·피드백뿐) 작고 동기 조회가
+ * 편하므로 localStorage(persist)에 둔다(워크스페이스 파일 버퍼와 달리 IndexedDB 불필요).
+ *
+ * ⚠️ MVP 한계: 인증·교수/학생 분리·다중 사용자·서버 집계는 범위 밖이다. 따라서 이 기록은
+ *    **이 브라우저에서 이뤄진 제출들**이며, 학생 식별은 제출 시 입력한 이름/별명에 의존한다
+ *    (변조 불가능한 보안 수준 아님 — CLAUDE.md 「아키텍처 방향」 참조).
+ *
+ * persist key: 'despy-submissions' (version 1)
+ *
+ * 사용처: features/solve(제출 기록), features/author(대시보드 조회)
+ */
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import type { ChallengeGradingResult } from '@/shared/core/types';
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+/** 저장되는 제출 1건 — 채점 결과 + 식별 정보(이름/별명). */
+export interface StoredSubmission {
+  /** 제출 고유 id(클라이언트 생성). */
+  id: string;
+  /** 제출 시 입력한 이름/별명(비우면 '익명'). */
+  studentName: string;
+  /** 공식 채점 결과(서버 /api/grade 응답). submittedAt·finalScore 포함. */
+  result: ChallengeGradingResult;
+}
+
+interface SubmissionStoreState {
+  /** 과제 id → 제출 목록(삽입 순서; 표시는 조회 측에서 정렬). */
+  submissions: Record<string, StoredSubmission[]>;
+  /** 제출 1건을 해당 과제 목록에 추가한다. */
+  addSubmission: (challengeId: string, submission: StoredSubmission) => void;
+  /** 해당 과제의 제출 기록을 모두 비운다(대시보드 정리용). */
+  clearSubmissions: (challengeId: string) => void;
+}
+
+// ── 초기 상태 ───────────────────────────────────────────────────────────────
+
+const initialSubmissions: Record<string, StoredSubmission[]> = {};
+
+// ── Store 정의 ───────────────────────────────────────────────────────────────
+
+export const useSubmissionStore = create<SubmissionStoreState>()(
+  persist(
+    (set) => ({
+      submissions: initialSubmissions,
+
+      addSubmission: (challengeId, submission) =>
+        set((state) => ({
+          submissions: {
+            ...state.submissions,
+            [challengeId]: [...(state.submissions[challengeId] ?? []), submission],
+          },
+        })),
+
+      clearSubmissions: (challengeId) =>
+        set((state) => {
+          if (!state.submissions[challengeId]) return state;
+          const next = { ...state.submissions };
+          delete next[challengeId];
+          return { submissions: next };
+        }),
+    }),
+    {
+      name: 'despy-submissions',
+      version: 1,
+    },
+  ),
+);
+
+// ── Selector 헬퍼 ─────────────────────────────────────────────────────────────
+
+/** 스토어 밖에서 특정 과제의 제출 목록을 동기 조회한다. */
+export function getSubmissions(challengeId: string): StoredSubmission[] {
+  return useSubmissionStore.getState().submissions[challengeId] ?? [];
+}

@@ -15,12 +15,19 @@
 | **P2** | WebContainer 내 `npm test` 결과 캡처 | ✅ 완료 (테스트 탭·`runTests`·vitest 템플릿) |
 | **P3** | AI 루브릭 채점 + 가중합 | ✅ 완료 (백엔드·데이터 + 제출 UI 연결·결과 모달) |
 | **P4** | 출제 도구 + 제출 플로우 + 워크스페이스 persist | ✅ 완료 (출제 도구 ✅ / 워크스페이스 영속 `despy-workspace` IndexedDB+델타 ✅·실측) |
-| **P5** | 구 Judge0/Problem 경로 제거 | ❌ 미착수 |
+| **P5** | 구 Judge0 채점 제거 → **AI 채점으로 교체** | ✅ 완료 (알고리즘 경로는 유지) |
 
 **핵심 방향 변경(2026-06-24)**: 백엔드 최소화 원칙 **해제**. 채점 무결성을 위해 공식 점수는
 서버(`/api/grade`)가 확정한다(§13 결정6). 채점 무결성 = (b) 서버 재실행 하이브리드 채택.
 
-**빌드 상태**: `npm run typecheck` ✅ · `npm run lint`(레이어 규칙 포함) ✅ · `npm run test` ✅ (6파일 51테스트).
+**P5 방향 변경(2026-06-24)**: 당초 P5는 "구 Judge0/Problem 경로 **제거**"였으나, 알고리즘 코테
+기능은 살리되 채점만 AI로 바꾸기로 결정. **Judge0 실행 계층만 제거**하고(`/api/judge`·`judgeApi`·
+`judgeQueries`·`docker-compose.judge0.yml`·`docs/judge0.md`·`JUDGE0_*`·`judge0Id`/`judge0LanguageId`/
+`isMock`), 알고리즘 채점은 **AI 정성 판정**(`/api/grade/algorithm`)으로 교체했다. `Problem`/
+`problemStore`/`SolveView`/구 author는 모두 **유지**. 트레이드오프: AI는 코드를 실행하지 않고
+추론하므로 정답성·엣지·TLE 판정이 근사다(무결성 한계는 UI에 명시).
+
+**빌드 상태**: `npm run typecheck` ✅ · `npm run lint`(레이어 규칙 포함) ✅ · `npm run test` ✅ (6파일 60테스트).
 
 ---
 
@@ -189,9 +196,12 @@ RubricGradingResult     — AI 루브릭 채점 결과 (scores·totalScore·maxS
 ChallengeGradingResult  — 종합 채점 (autoTest + rubric + finalScore)
 ChallengeGradingRequest — 채점 요청 계약 (클라 → /api/grade)
 
--- 구 모델 (P5에서 제거 예정) --
-SupportedLanguage, TestCase, AiPolicy, Problem,
-TestCaseStatus, TestCaseResult, GradingResult, GradingRequest, AgentUsageMetadata
+-- 알고리즘 모델 (유지 — AI 채점) --
+SupportedLanguage(judge0Id 제거됨), TestCase, Problem,
+TestCaseStatus, TestCaseResult(reason? 추가), GradingResult(feedback 추가·isMock 제거),
+GradingRequest(statement/model 추가·judge0LanguageId 제거 → /api/grade/algorithm)
+-- 공용 --
+AiPolicy, AgentUsageMetadata
 ```
 
 ---
@@ -201,13 +211,13 @@ TestCaseStatus, TestCaseResult, GradingResult, GradingRequest, AgentUsageMetadat
 ```
 src/
 ├── app/
-│   ├── page.tsx                       — 홈(과제/구 문제 목록)
+│   ├── page.tsx                       — 홈(과제/알고리즘 문제 목록)
 │   ├── playground/page.tsx            — /playground PoC 라우트 ✅ P0/P1
 │   ├── workspace/[challengeId]/page.tsx — /workspace 풀이 라우트 ✅ P1
 │   └── api/
 │       ├── agent/route.ts             — AI 프록시(Gemini)
-│       ├── grade/route.ts             — 공식 채점(루브릭+가중합) ✅ P3
-│       └── judge/route.ts             — 구 채점 (P5 제거)
+│       ├── grade/route.ts             — 과제 공식 채점(루브릭+가중합) ✅ P3
+│       └── grade/algorithm/route.ts   — 알고리즘 공식 채점(AI 정성 판정) ✅ P5 (judge 대체)
 │
 ├── features/solve/
 │   ├── WorkspacePlaygroundView.tsx    — 2-pane PoC ✅ P1
@@ -261,10 +271,20 @@ src/
   `idbStorage`(네이티브 어댑터) + `workspaceStore`(델타) + `useWorkspace`(복원/저장·hasHydrated 게이트)
   + `ChallengeSolveView`(AI 사용량 영속화). headless Chrome로 편집→IDB 저장→새로고침 복원 실측 PASS.
 
-### P5 — 구 경로 정리
-- `/api/judge`·`judgeApi`·`judgeQueries`·`GradingRequest`·`docker-compose.judge0.yml`·
-  `docs/judge0.md`·`JUDGE0_*`·`languages.judge0Id` 제거
-- `problemStore`(`despy-problems`)·`SolveView`·`ProblemPanel`·`CodeEditorPanel`·`GradingResultPanel` 제거
+### P5 — Judge0 채점 제거 → AI 채점 교체 (완료 2026-06-24)
+- ✅ **제거(Judge0 실행 계층만)**: `/api/judge`·`judgeApi`·`judgeQueries`·
+  `docker-compose.judge0.yml`·`docs/judge0.md`·`JUDGE0_*` env·`SupportedLanguage.judge0Id`·
+  `GradingRequest.judge0LanguageId`·`GradingResult.isMock`.
+- ✅ **교체(AI 알고리즘 채점)**: `grader` 인터페이스에 `gradeAlgorithm` 추가 →
+  `geminiGrader`(구조화 출력으로 케이스별 통과/실패·근거 판정, `INJECTION_GUARD` 재사용) ·
+  `score.normalizeAlgorithmResult`(케이스 정규화·비공개 가림·통과수 집계) ·
+  `requestValidation.validateAlgorithmRequest`. 라우트 `POST /api/grade/algorithm`.
+  클라: `algorithmGradeApi`+`algorithmGradeQueries`(`useGradeAlgorithm`) → SolveView 재배선.
+  `GradingResultPanel`은 "AI 채점(실행 아님)" 배너 + 케이스별 근거 + 종합 피드백 표시.
+- ✅ **유지**: `Problem`·`problemStore`(`despy-problems`)·`SolveView`·`ProblemPanel`·
+  `CodeEditorPanel`·구 author 전체. 알고리즘 코테 기능은 살아 있고 채점만 AI로 바뀜.
+- 트레이드오프(결정): 정확한 실행 채점 vs 다언어 vs Judge0 제거의 트릴레마에서 **AI 채점**(다언어
+  유지·Judge0 제거) 선택. AI는 코드를 실행하지 않고 추론하므로 정답성·엣지·TLE 판정이 근사다.
 
 ---
 

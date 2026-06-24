@@ -14,6 +14,9 @@
  *    challengeId별로 IndexedDB(despy-workspace)에 저장·복원된다 — 새로고침해도
  *    진행이 유지된다(docs/spec-webcontainer.md §9.1).
  *
+ * 제출 기록: 채점 성공 시 결과를 입력한 이름/별명과 함께 submissionStore에 저장해
+ *    교수 채점 대시보드(GradingDashboardView)의 데이터 소스가 되게 한다.
+ *
  * 사용처: app/workspace/[challengeId]/page.tsx
  */
 'use client';
@@ -28,6 +31,7 @@ import type {
 } from '@/shared/core/types';
 import { Button } from '@/shared/components/ui/Button';
 import { useGradeChallenge } from '@/shared/core/queries/gradeQueries';
+import { useSubmissionStore } from '@/shared/core/stores/submissionStore';
 import { useWorkspace } from '@/features/solve/useWorkspace';
 import { AiChatPanel } from '@/features/solve/components/AiChatPanel';
 import { ChallengeGradingResultPanel } from '@/features/solve/components/ChallengeGradingResultPanel';
@@ -138,6 +142,18 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     [recordAiTurn],
   );
 
+  // 질문에 첨부할 현재 코드 상태 — 지금 에디터에 열린 활성 파일의 경로+내용을 보낸다.
+  // 전송 시점에 호출되므로 최신 버퍼를 ref로 읽어 콜백 재생성을 피한다.
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+  const getCodeContext = useCallback(() => {
+    const path = activePathRef.current;
+    const contents = filesRef.current[path] ?? '';
+    return `현재 편집 중인 파일: ${path}\n\`\`\`\n${contents}\n\`\`\``;
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     setSubmitError(null);
     try {
@@ -213,6 +229,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
             onAiCodeStreamStart={handleAiCodeStreamStart}
             onAiCodeStream={handleAiCodeStream}
             onAiCodeStreamEnd={handleAiCodeStreamEnd}
+            getCodeContext={getCodeContext}
           />
         </AiColumn>
 

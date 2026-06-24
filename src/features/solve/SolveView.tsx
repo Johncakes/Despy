@@ -71,6 +71,13 @@ export function SolveView({ problem }: { problem: Problem }) {
     setIsAiWritingCode(false);
   }, []);
 
+  // 질문에 첨부할 현재 코드 상태 — 전송 시점에 스토어에서 최신 코드를 읽는다.
+  const getCodeContext = useCallback(() => {
+    const current = useSolveSessionStore.getState().sessions[problem.id];
+    if (!current) return '';
+    return `현재 코드 (${current.languageId}):\n\`\`\`\n${current.code}\n\`\`\``;
+  }, [problem.id]);
+
   const handleUndoAiCode = () => {
     if (aiCodeSnapshot === null) return;
     setCode(problem.id, aiCodeSnapshot);
@@ -138,6 +145,7 @@ export function SolveView({ problem }: { problem: Problem }) {
             onAiCodeStreamStart={handleAiCodeStreamStart}
             onAiCodeStream={handleAiCodeStream}
             onAiCodeStreamEnd={handleAiCodeStreamEnd}
+            getCodeContext={getCodeContext}
           />
         </AiColumn>
 

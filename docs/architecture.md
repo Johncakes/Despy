@@ -3,11 +3,19 @@
 이 문서는 **구현된 MVP가 실제로 어떻게 동작하는지**를 사람이 읽기 위한 설명서다.
 요청/응답 계약, 데이터 흐름, 상태 관리, 한계를 담는다.
 
+> ⚠️ **갱신(P5, 2026-06-24) — 채점 채널 변경**: 알고리즘 채점이 **Judge0 실행 채점에서
+> AI 정성 채점으로 교체**되었다. `/api/judge`·`JUDGE0_URL`·`docker-compose.judge0.yml`은
+> **제거**되었고, 제출은 `POST /api/grade/algorithm`(코드를 실행하지 않고 테스트케이스 기준으로
+> AI가 정답성 판정)으로 채점된다. 아래 본문의 Judge0 관련 서술(§3.2·환경변수·데이터 흐름)은
+> **피벗 전 기록**이며, 현재 동작은 이 배너와 [`CLAUDE.md`](../CLAUDE.md)·
+> [`docs/spec-webcontainer.md`](./spec-webcontainer.md)를 기준으로 한다. 실무형 웹 과제는
+> 브라우저 내 WebContainer에서 실행하고 `/api/grade`(루브릭 채점)로 채점한다.
+
 > 문서 지도
 > - [`CLAUDE.md`](../CLAUDE.md) — AI 에이전트용 프로젝트 지도(레이어 규칙·컨벤션 요약)
 > - [`docs/conventions.md`](./conventions.md) — 코딩 컨벤션 상세
-> - [`docs/judge0.md`](./judge0.md) — Judge0 로컬 채점 셋업
-> - **이 문서** — MVP 동작 원리 & 구현 walkthrough
+> - [`docs/spec-webcontainer.md`](./spec-webcontainer.md) — WebContainer 피벗 명세(현행 방향)
+> - **이 문서** — MVP 동작 원리 & 구현 walkthrough (피벗 전 기록, 채점 채널은 위 배너 참조)
 
 ---
 

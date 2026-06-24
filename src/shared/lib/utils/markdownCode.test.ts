@@ -14,8 +14,12 @@ describe('extractStreamingCodeBlock', () => {
     expect(extractStreamingCodeBlock('여기 설명만 있어요')).toBeNull();
   });
 
-  it('여는 펜스 + info 문자열만 있으면 빈 문자열', () => {
-    expect(extractStreamingCodeBlock('설명\n```python')).toBe('');
+  it('여는 펜스 + info 문자열만 있고 본문 줄바꿈 전이면 null (언어 미확정)', () => {
+    expect(extractStreamingCodeBlock('설명\n```python')).toBeNull();
+  });
+
+  it('info 줄바꿈 직후 본문이 비어 있으면 빈 문자열(쓰기 시작)', () => {
+    expect(extractStreamingCodeBlock('설명\n```python\n')).toBe('');
   });
 
   it('작성 중(닫히지 않은) 블록의 현재 코드를 반환', () => {
@@ -33,8 +37,24 @@ describe('extractStreamingCodeBlock', () => {
     expect(extractStreamingCodeBlock(noLang)).toBe('hello\n');
   });
 
-  it('블록이 여러 개면 마지막(작성 중) 블록을 반환', () => {
+  it('블록이 여러 개면 마지막(작성 중) 소스 블록을 반환', () => {
     const multi = '```py\nA\n```\n중간\n```js\nB = 2';
     expect(extractStreamingCodeBlock(multi)).toBe('B = 2');
+  });
+
+  it('소스 블록 뒤 쉘 명령(```bash) 블록은 건너뛰고 소스 블록을 반환', () => {
+    const withShell =
+      '코드:\n```jsx\nconst a = 1;\n```\n실행:\n```bash\nnpm install\nnpm run dev\n```';
+    expect(extractStreamingCodeBlock(withShell)).toBe('const a = 1;\n');
+  });
+
+  it('쉘(```sh) 블록만 있으면 null (소스 파일을 덮어쓰지 않음)', () => {
+    const onlyShell = '아래 명령을 실행하세요:\n```sh\nnpm run dev\n```';
+    expect(extractStreamingCodeBlock(onlyShell)).toBeNull();
+  });
+
+  it('소스 블록 뒤 쉘 펜스가 막 열린(스트리밍) 중에도 소스 블록을 유지', () => {
+    const streamingShell = '```jsx\nconst a = 1;\n```\n실행:\n```bash';
+    expect(extractStreamingCodeBlock(streamingShell)).toBe('const a = 1;\n');
   });
 });

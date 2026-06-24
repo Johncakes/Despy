@@ -3,9 +3,11 @@
 > 에이전틱 코딩 평가 시스템 — 학생이 **통제된 AI 에이전트**를 활용해 알고리즘 문제를 푸는 과정을 평가하는 웹 서비스.
 
 교수가 문제·테스트케이스와 AI 정책(모델 고정·질문 횟수·토큰·시스템 프롬프트)을 통제하고,
-학생은 제한된 자원 안에서 AI를 부려 코드를 작성·제출한다. 제출 코드는 Judge0로 자동 채점된다.
+학생은 제한된 자원 안에서 AI를 부려 코드를 작성·제출한다. 제출 코드는 **AI 정성 채점**으로
+평가된다(코드 실행 없이 테스트케이스 기준 정답성 판정 — Judge0 실행 채점 제거, P5).
+실무형 웹 과제는 브라우저 내 **WebContainer**에서 실행·미리보기한다(피벗).
 
-> **상태**: MVP 구현 완료 — 교수 출제(`/author`) · 학생 풀이(`/solve/[id]`) · AI/채점 프록시.
+> **상태**: MVP 구현 완료 — 교수 출제(`/author`) · 학생 풀이(`/solve/[id]`) · AI 프록시·AI 채점.
 > 동작 원리는 [`docs/architecture.md`](./docs/architecture.md) 참조.
 
 ## 기능 (MVP)
@@ -13,20 +15,20 @@
 - **교수** (`/author`): 문제·입출력·제한·허용 언어·테스트 케이스(공개/비공개)·AI 정책 출제
 - **학생** (`/solve/[id]`): 문제 지문 · Monaco 에디터 · 제한된 AI 도우미 · 예제 실행/제출 · 채점 결과
 - **AI 계층** (`/api/agent`): Gemini 프록시 — 키 은닉 + 시스템 프롬프트 주입 + 토큰 usage
-- **채점 계층** (`/api/judge`): Judge0 프록시 — `JUDGE0_URL` 없으면 **모의 채점**으로 즉시 동작
+- **채점 계층** (`/api/grade`, `/api/grade/algorithm`): AI 정성 채점 — 코드를 실행하지 않고
+  테스트케이스/루브릭 기준으로 판정. 무결성 한계(실행 아닌 추론)는 UI에 명시
 
 ## 빠른 시작
 
 ```bash
 npm install
 cp .env.example .env.local   # GEMINI_API_KEY 입력 (https://aistudio.google.com/apikey)
-npm run dev                  # http://localhost:3000  (채점은 키 없이도 모의로 동작)
+npm run dev                  # http://localhost:3000  (채팅·채점 모두 GEMINI_API_KEY 필요)
 ```
 
 | 환경 변수 | 필수 | 용도 |
 |---|---|---|
-| `GEMINI_API_KEY` | AI 사용 시 | Gemini 키(서버 전용, 클라이언트 비노출) |
-| `JUDGE0_URL` | 선택 | 없으면 모의 채점 · 있으면 실제 Judge0 ([docs/judge0.md](./docs/judge0.md)) |
+| `GEMINI_API_KEY` | 필수 | Gemini 키(서버 전용, 클라이언트 비노출) — AI 채팅 + 채점 공용 |
 
 ## 스크립트
 
@@ -44,19 +46,20 @@ npm run dev                  # http://localhost:3000  (채점은 키 없이도 �
 ## 기술 스택
 
 Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query
-· Monaco Editor · Vercel AI SDK (`@ai-sdk/google`, Gemini) · react-markdown · Judge0
+· Monaco Editor · Vercel AI SDK (`@ai-sdk/google`, Gemini) · react-markdown · WebContainer (`@webcontainer/api`)
 
-> **방향**: 백엔드 최소화(키 은닉·프록시용 Route Handler 2개) · MongoDB 지양.
-> 현재 데이터는 localStorage에 저장하며 `shared/lib/db/mongodb.ts`·`MONGODB_URI`는 미사용(제거 대상).
+> **방향**(2026-06-24 갱신): 백엔드 최소화 원칙 **해제** — 채점 무결성·민감정보 은닉은 서버 책임.
+> 채점은 AI 정성 판정으로 일원화(코드 실행 인프라 불필요). 데이터는 localStorage/IndexedDB에 저장하며
+> `shared/lib/db/mongodb.ts`·`MONGODB_URI`는 현재 미사용(영속 도입은 사안별 결정).
 
 ## 문서
 
 | 문서 | 내용 |
 |---|---|
 | [`docs/architecture.md`](./docs/architecture.md) | **MVP 동작 원리** — 요청/응답 계약, 데이터 흐름, 상태 관리, 한계 |
+| [`docs/spec-webcontainer.md`](./docs/spec-webcontainer.md) | WebContainer 피벗 명세 (실무형 웹 과제·AI 채점) |
 | [`CLAUDE.md`](./CLAUDE.md) | AI 에이전트 작업 가이드 (레이어 규칙·컨벤션 요약) |
 | [`docs/conventions.md`](./docs/conventions.md) | 코딩 컨벤션 상세 |
-| [`docs/judge0.md`](./docs/judge0.md) | Judge0 로컬 채점 셋업 |
 
 핵심 원칙: **feature-based 구조 + 단방향 레이어 의존**(`features → shared`만 허용).
 이 규칙은 `eslint.config.mjs`의 `import/no-restricted-paths`로 빌드에서 강제됩니다.

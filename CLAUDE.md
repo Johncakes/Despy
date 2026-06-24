@@ -9,13 +9,14 @@
 
 AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문제를 푸는 능력"을 정량 평가한다.
 교수는 문제·테스트케이스를 출제하고 AI 정책(모델 고정·질문 횟수·토큰·시스템 프롬프트)을 통제하며,
-학생은 제한된 자원 안에서 AI 에이전트를 활용해 코드를 작성·제출하고 Judge0로 자동 채점받는다.
+학생은 제한된 자원 안에서 AI 에이전트를 활용해 코드를 작성·제출하고 AI 정성 채점을 받는다.
 
 핵심 도메인 (MVP 구현됨):
 - **교수** (`features/author`): 문제 출제 + AI 정책 설정 (모델·질문/토큰 한도·시스템 프롬프트)
 - **학생** (`features/solve`): 문제 지문 + 제한된 AI 대화(주역) + Monaco 에디터 + 제출·채점 결과
   - AI 답변의 코드 펜스를 에디터로 **실시간 미러링**(직접 편집 토글·작성 중 read-only·되돌리기)
-- **채점** (`app/api/judge`): Judge0 프록시 — `JUDGE0_URL` 없으면 모의(mock) 채점으로 폴백
+- **채점** (`app/api/grade/algorithm`): AI 정성 채점 — 코드를 실행하지 않고 테스트케이스 기준으로
+  정답성을 판정한다(Judge0 실행 채점 제거 — P5, 2026-06-24). 무결성 한계(실행 아닌 추론)는 UI에 명시.
 - **AI 계층** (`app/api/agent`): Gemini 프록시 — 키 은닉 + 시스템 프롬프트 주입 + 출력 토큰 한도
 
 > 상세 명세는 별도 기획 문서 참조.
@@ -52,9 +53,8 @@ npm run test         # vitest 실행
 # git commit 시 husky가 자동으로 tsc + lint 실행 (lint-staged)
 ```
 
-- **환경 변수**: `.env.local`에 `GEMINI_API_KEY` 필요(AI). `JUDGE0_URL`은 선택(없으면 모의 채점).
-  자세히는 `.env.example` / `docs/judge0.md`.
-- **배포**: 미정 (Judge0는 Docker 기반 별도 배포 필요 — `docker-compose.judge0.yml`)
+- **환경 변수**: `.env.local`에 `GEMINI_API_KEY` 필요(AI 채팅 + 채점 공용). 자세히는 `.env.example`.
+- **배포**: 미정 (코드 실행 채점 인프라 불필요 — 채점은 AI 정성 판정으로 일원화. WebContainer는 브라우저 내 실행)
 - **기술 스택**: Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query
   · Monaco Editor(`@monaco-editor/react`) · Vercel AI SDK(`ai` + `@ai-sdk/google`, Gemini) · react-markdown
   · **WebContainer**(`@webcontainer/api`, 브라우저 내 Node 런타임 — 피벗 P0~)
@@ -71,26 +71,26 @@ npm run test         # vitest 실행
 ```
 src/
 ├── app/                          Next.js App Router (라우팅만 — 로직 없음)
-│   ├── page.tsx                  홈 (역할 진입 + 과제/구 문제 목록)
-│   ├── author/page.tsx           교수 출제 화면 진입점 (구 알고리즘 — P5 정리 예정)
+│   ├── page.tsx                  홈 (역할 진입 + 과제/알고리즘 문제 목록)
+│   ├── author/page.tsx           교수 출제 화면 진입점 (알고리즘 — Problem)
 │   ├── author/challenge/page.tsx 교수 과제 출제 화면 진입점 (워크스페이스 — 피벗 P4)
 │   ├── author/challenge/[challengeId]/submissions/page.tsx 교수 채점 대시보드 진입점 (스캐폴드 — 제출 영속 후속)
-│   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (구 알고리즘 — P5 정리 예정)
+│   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (알고리즘 — AI 채점)
 │   ├── workspace/[challengeId]/page.tsx 학생 과제 풀이(워크스페이스) 진입점 (피벗 P1)
 │   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
-│   └── api/                      유일한 백엔드 (키 은닉·프록시)
+│   └── api/                      백엔드 (키 은닉·AI 프록시·채점)
 │       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage)
-│       ├── grade/route.ts        공식 채점 (AI 루브릭 정성 채점 + 가중합, 피벗 P3)
-│       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백, 구 — P5 제거 예정)
+│       ├── grade/route.ts        과제 공식 채점 (AI 루브릭 정성 채점 + 가중합, 피벗 P3)
+│       └── grade/algorithm/route.ts 알고리즘 공식 채점 (AI 정성 판정 — Judge0 대체, P5)
 │
 ├── features/                     도메인별 기능 모듈 (세로 슬라이스)
-│   ├── author/                   교수(구 알고리즘): AuthorView, ProblemForm, TestCaseEditor,
+│   ├── author/                   교수(알고리즘): AuthorView, ProblemForm, TestCaseEditor,
 │   │                             AiPolicyFields(공용), useProblemDraft
 │   │                             + (피벗 P4) ChallengeAuthorView, useChallengeDraft, components/
 │   │                               ChallengeForm·FileSetEditor(프리셋·잠금 토글)·RubricEditor
 │   │                               + GradingDashboardView (채점 대시보드 진입점 스캐폴드 — 제출 영속 후속)
-│   └── solve/                    학생(구 알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
-│                                 GradingResultPanel
+│   └── solve/                    학생(알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
+│                                 GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
 │                                 + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
 │                                   AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
 │                                   WorkspacePanel·WorkspaceEditorPanel·FileTree·WorkspacePlaygroundView
@@ -98,15 +98,15 @@ src/
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
-    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · judgeApi.ts (구 채점 fetch, P5 제거)
-    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), problemStore.ts(구), solveSessionStore.ts (Zustand persist)
-    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), judgeQueries.ts (구, P5 제거), queryKeys.ts
-    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 구 Problem 계열)
-    │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(구),
+    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체)
+    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), problemStore.ts(알고리즘), solveSessionStore.ts (Zustand persist)
+    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), queryKeys.ts
+    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열)
+    │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
     │                             webcontainerTemplates.ts (샘플 Vite+React 트리)
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
-    │   ├── grader/               grader.ts(인터페이스) · geminiGrader.ts(구현) · score.ts(정규화·가중합) · requestValidation.ts(요청 검증) · index.ts(교체점)
+    │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
     │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
@@ -163,14 +163,15 @@ interface ListProps {
 - _(MongoDB 사용 시에만)_ **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — DB 도입은 사안별 결정이며(2026-06-24 백엔드 최소화 해제), 저장소를 추가할 땐 별도 논의한다
 
 **현재 구현**
-- 서버 데이터: 채점은 **mutation**(`useGradeSubmission`, `shared/core/queries/judgeQueries.ts`).
+- 서버 데이터: 채점은 **mutation** — 과제는 `useGradeChallenge`(`gradeQueries.ts` → `/api/grade`),
+  알고리즘은 `useGradeAlgorithm`(`algorithmGradeQueries.ts` → `/api/grade/algorithm`).
   단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `problemStore`(구 알고리즘 문제, P5 제거 예정), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `problemStore → 'despy-problems'` (v1, 구), `solveSessionStore → 'despy-solve-session'` (v1)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 

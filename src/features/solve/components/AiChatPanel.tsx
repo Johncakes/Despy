@@ -6,9 +6,14 @@
  * 받아 한도를 차감한다(onTurnComplete). 한도 소진 시 입력이 비활성화된다.
  * 접힘(isOpen=false) 상태에서도 마운트를 유지해 대화 기록이 보존된다.
  *
- * 실시간 코드 미러링: '직접 편집'이 켜져 있으면 스트리밍 답변의 마지막 코드
+ * 실시간 코드 미러링: '직접 편집'이 켜져 있으면 스트리밍 답변의 마지막 소스 코드
  * 블록을 토큰 단위로 추출해 콜백(onAiCodeStream)으로 에디터에 흘려보낸다.
  * 쓰기 시작 시 onAiCodeStreamStart(스냅샷), 종료 시 onAiCodeStreamEnd를 호출한다.
+ *
+ * 코드 첨부(선택): getCodeContext가 주어지고 '코드 첨부' 토글이 켜져 있으면, 질문을
+ * 보낼 때 현재 코드 상태를 메시지 뒤에 덧붙여 AI가 맥락을 보고 답하게 한다. 첨부분은
+ * 학생이 보낸 user 메시지로 전달되며(시스템 프롬프트로 승격하지 않아 가드레일 우회
+ * 위험을 피한다), 말풍선에는 질문만 표시하고 첨부 여부는 작은 칩으로만 알린다.
  *
  * AI 정책만 의존하므로 prop으로 `aiPolicy`만 받는다(구 Problem·신 ChallengeProblem
  * 양쪽에서 재사용 — 특정 문제 모델에 결합하지 않는다).
@@ -32,6 +37,12 @@ import { Markdown } from '@/shared/components/ui/Markdown';
 
 const MAX_OUTPUT_TOKENS_CAP = 2048;
 
+/**
+ * 질문 뒤에 붙이는 코드 첨부 구분자. 전송 텍스트에는 포함되지만(AI는 봄),
+ * 말풍선 렌더 시 이 구분자 앞부분(질문)만 보여주고 뒷부분(코드)은 칩으로 숨긴다.
+ */
+const CODE_CONTEXT_DELIMITER = '\n\n[despy:현재 코드 상태]\n';
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface AiChatPanelProps {
@@ -52,6 +63,23 @@ interface AiChatPanelProps {
   onAiCodeStream: (code: string) => void;
   /** 스트리밍 종료 (부모가 '작성 중' 해제) */
   onAiCodeStreamEnd: () => void;
+  /**
+   * 현재 코드 상태를 마크다운 문자열로 반환한다(전송 시점에 호출). 주어지면 '코드 첨부'
+   * 토글이 노출되어, 켜져 있을 때 질문 뒤에 이 문자열을 덧붙여 보낸다. 없으면 토글 미노출.
+   */
+  getCodeContext?: () => string;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * 전송 텍스트를 [질문, 첨부된 코드(없으면 null)]로 분리한다 — 말풍선에 질문만
+ * 보여주고 코드 첨부 여부는 칩으로만 표시하기 위함이다.
+ */
+function splitQuestionAndContext(text: string): [string, string | null] {
+  const index = text.indexOf(CODE_CONTEXT_DELIMITER);
+  if (index === -1) return [text, null];
+  return [text.slice(0, index), text.slice(index + CODE_CONTEXT_DELIMITER.length)];
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -68,10 +96,14 @@ export function AiChatPanel({
   onAiCodeStreamStart,
   onAiCodeStream,
   onAiCodeStreamEnd,
+  getCodeContext,
 }: AiChatPanelProps) {
   const policy = aiPolicy;
   const remainingQuestions = Math.max(policy.maxQuestions - questionsUsed, 0);
   const remainingTokens = Math.max(policy.maxTokens - tokensUsed, 0);
+  // 코드 첨부는 부모가 getCodeContext를 줄 때만 노출한다. 기본 ON(맥락 제공이 목적).
+  const canAttachCode = typeof getCodeContext === 'function';
+  const [isAttachCodeEnabled, setIsAttachCodeEnabled] = useState(true);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: '/api/agent' }),
@@ -131,8 +163,15 @@ export function AiChatPanel({
 
   const handleSend = () => {
     if (!canSend) return;
-    const text = input;
+    const question = input;
     setInput('');
+    // 코드 첨부가 켜져 있으면 현재 코드 상태를 질문 뒤에 덧붙인다. user 메시지로
+    // 전달되므로 시스템 프롬프트(가드레일)를 건드리지 않는다.
+    const codeContext =
+      canAttachCode && isAttachCodeEnabled ? getCodeContext?.() : undefined;
+    const text = codeContext
+      ? `${question}${CODE_CONTEXT_DELIMITER}${codeContext}`
+      : question;
     sendMessage(
       { text },
       {
@@ -173,14 +212,24 @@ export function AiChatPanel({
       </Header>
 
       <Controls>
-        <DirectEditToggle>
+        <ToggleLabel>
           <input
             type="checkbox"
             checked={isDirectEditEnabled}
             onChange={onToggleDirectEdit}
           />
           AI 직접 편집 (코드를 에디터에 실시간 작성)
-        </DirectEditToggle>
+        </ToggleLabel>
+        {canAttachCode && (
+          <ToggleLabel>
+            <input
+              type="checkbox"
+              checked={isAttachCodeEnabled}
+              onChange={() => setIsAttachCodeEnabled((enabled) => !enabled)}
+            />
+            현재 코드 첨부 (질문에 지금 코드 상태를 함께 전송)
+          </ToggleLabel>
+        )}
       </Controls>
 
       <Quota>
@@ -199,12 +248,19 @@ export function AiChatPanel({
             .filter((part) => part.type === 'text')
             .map((part) => part.text)
             .join('');
+          // user 메시지는 첨부된 코드 상태를 숨기고 질문만 보여준다(첨부 여부는 칩).
+          const [question, attachedCode] = splitQuestionAndContext(text);
           return (
             <Bubble key={message.id} $role={message.role}>
               {message.role === 'assistant' ? (
                 <Markdown>{text}</Markdown>
               ) : (
-                <UserText>{text}</UserText>
+                <>
+                  <UserText>{question}</UserText>
+                  {attachedCode !== null && (
+                    <AttachedChip>📎 현재 코드 첨부됨</AttachedChip>
+                  )}
+                </>
               )}
             </Bubble>
           );
@@ -290,11 +346,14 @@ const HeaderTitle = styled.div`
 `;
 
 const Controls = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
   padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
-const DirectEditToggle = styled.label`
+const ToggleLabel = styled.label`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.xs};
@@ -343,6 +402,15 @@ const UserText = styled.div`
   font-size: ${({ theme }) => theme.font.sizeSm};
   white-space: pre-wrap;
   word-break: break-word;
+`;
+
+// 코드가 첨부된 user 메시지에 다는 작은 표식(코드 본문은 말풍선에 노출하지 않음).
+const AttachedChip = styled.span`
+  display: inline-flex;
+  align-items: center;
+  margin-top: ${({ theme }) => theme.spacing.xs};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  opacity: 0.8;
 `;
 
 const ErrorText = styled.p`

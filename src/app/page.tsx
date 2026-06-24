@@ -32,7 +32,7 @@ export default function HomePage() {
             <Button variant="primary">교수 모드 — 과제 출제</Button>
           </Link>
           <Link href="/author">
-            <Button variant="ghost">(구) 알고리즘 문제 출제</Button>
+            <Button variant="ghost">알고리즘 문제 출제</Button>
           </Link>
           <Link href="/playground">
             <Button variant="ghost">WebContainer PoC →</Button>
@@ -61,7 +61,7 @@ export default function HomePage() {
       </ListWrap>
 
       <ListWrap>
-        <Panel title="(구) 알고리즘 문제 — Judge0 (P5에서 정리 예정)">
+        <Panel title="알고리즘 문제 (AI 채점)">
           <List>
             {!hasMounted && <Empty>불러오는 중…</Empty>}
             {hasMounted &&
