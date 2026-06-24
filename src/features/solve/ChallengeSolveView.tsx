@@ -82,6 +82,8 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   // 제출/채점(P3) 상태 — 결과 모달과 제출 에러.
   const [gradingResult, setGradingResult] = useState<ChallengeGradingResult | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // 제출자 이름/별명 — 채점 대시보드에서 제출을 구분하는 식별자(인증 없음, 입력 의존).
+  const [studentName, setStudentName] = useState('');
 
   // ── 이탈 방지 (WebContainer 재설치 방지) ─────────────────────────────────
   // WebContainer가 준비된(또는 준비 중인) 상태에서 페이지를 새로고침하거나 탭을
@@ -176,11 +178,17 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         model: challenge.aiPolicy.model,
       });
       setGradingResult(result);
+      // 채점 결과를 제출 기록으로 저장 → 교수 대시보드 데이터 소스. 이름은 비우면 '익명'.
+      useSubmissionStore.getState().addSubmission(challenge.id, {
+        id: crypto.randomUUID(),
+        studentName: studentName.trim() || '익명',
+        result,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setSubmitError(message);
     }
-  }, [testResult, runTests, files, challenge, grade]);
+  }, [testResult, runTests, files, challenge, grade, studentName]);
 
   // 워크스페이스가 준비되어야(테스트 실행 가능) 제출할 수 있다.
   const isSubmitting = grade.isPending;
@@ -203,6 +211,13 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
             AI 도우미 열기
           </Button>
         )}
+        <NameInput
+          value={studentName}
+          onChange={(event) => setStudentName(event.target.value)}
+          placeholder="이름/별명"
+          aria-label="제출자 이름/별명"
+          maxLength={40}
+        />
         <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
           {submitLabel}
         </Button>
@@ -307,6 +322,23 @@ const Title = styled.h1`
   flex: 1;
   margin: 0;
   font-size: ${({ theme }) => theme.font.sizeLg};
+`;
+
+// 제출자 이름 입력 — 상단 바에서 제출 버튼 옆. 좁게 두어 레이아웃을 차지하지 않는다.
+const NameInput = styled.input`
+  width: 140px;
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-family: inherit;
+  color: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
 `;
 
 // 제출 실패 메시지 — 길면 줄임표로 잘라 상단 바 레이아웃을 깨지 않는다(전문은 title 속성).

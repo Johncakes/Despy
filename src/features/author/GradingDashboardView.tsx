@@ -1,12 +1,14 @@
 /**
- * GradingDashboardView.tsx — 교수 채점 대시보드 (진입점 / 스캐폴드)
+ * GradingDashboardView.tsx — 교수 채점 대시보드
  *
- * 특정 과제의 채점 현황을 보여줄 교수용 화면. 현재는 제출(submission) 영속 모델이
- * 없어(인증·교수/학생 분리·다중 사용자·제출 저장은 MVP 범위 밖) 학생별 제출 목록은
- * 비어 있으며, 진입점 + 채점 기준(루브릭) 요약만 제공하는 스캐폴드다. 제출 영속·집계는
- * 후속 단계(새 저장소 도입 — Blocking 결정)로 미룬다(docs/spec-webcontainer.md §13).
+ * 특정 과제의 채점 현황을 보여주는 교수용 화면. 채점 기준(루브릭·AI정책) 요약과 함께,
+ * 학생이 풀이 화면에서 제출해 저장된 채점 결과 목록(submissionStore)을 점수·시각·제출자
+ * 이름과 함께 최신순으로 보여주고, 각 제출을 펼쳐 루브릭 항목별 점수·피드백을 확인한다.
  *
- * 과제는 props로 주입받는다(DI) — 데이터 조회는 라우트 진입점이 담당한다.
+ * ⚠️ MVP 한계: 인증·교수/학생 분리·서버 집계는 범위 밖이라, 이 목록은 **이 브라우저에서
+ *    이뤄진 제출들**이며 제출자 식별은 입력한 이름/별명에 의존한다(submissionStore 참조).
+ *
+ * 과제는 props로 주입받는다(DI). 제출 목록은 challengeId로 submissionStore에서 조회한다.
  *
  * 사용처: app/author/challenge/[challengeId]/submissions/page.tsx
  */
@@ -15,6 +17,7 @@
 import Link from 'next/link';
 import styled from 'styled-components';
 import type { ChallengeProblem } from '@/shared/core/types';
+import { useSubmissionStore } from '@/shared/core/stores/submissionStore';
 import { Panel } from '@/shared/components/ui/Panel';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -31,6 +34,21 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
     (sum, criterion) => sum + criterion.maxScore,
     0,
   );
+
+  // 이 과제의 제출 목록(없으면 undefined → 빈 배열은 selector 밖에서 만들어 참조 안정 유지).
+  const storedSubmissions = useSubmissionStore(
+    (state) => state.submissions[challenge.id],
+  );
+  const submissions = storedSubmissions ?? [];
+  // 최신 제출이 위로 오도록 제출 시각 내림차순 정렬(원본 불변).
+  const sortedSubmissions = [...submissions].sort(
+    (a, b) => b.result.submittedAt - a.result.submittedAt,
+  );
+
+  // 루브릭 항목 id → 설명(제출 상세에서 점수 옆에 표시).
+  const criterionLabel = (criterionId: string): string =>
+    rubric.criteria.find((criterion) => criterion.id === criterionId)?.description ??
+    criterionId;
 
   return (
     <Layout>
@@ -68,15 +86,51 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
           </AiMeta>
         </Panel>
 
-        <Panel title="학생 제출">
-          <PlaceholderBox>
-            <PlaceholderTitle>아직 표시할 제출이 없습니다</PlaceholderTitle>
-            <PlaceholderBody>
-              현재 채점은 학생 본인 화면에서 1회성으로 이뤄지며, 제출·점수를 저장하지
-              않습니다. 학생별 제출 목록·점수·재채점은 <strong>제출 영속 저장소</strong>가
-              도입되면 이 화면에 표시됩니다(인증·다중 사용자와 함께 정해질 후속 단계).
-            </PlaceholderBody>
-          </PlaceholderBox>
+        <Panel title={`학생 제출 (${sortedSubmissions.length})`}>
+          {sortedSubmissions.length === 0 ? (
+            <PlaceholderBox>
+              <PlaceholderTitle>아직 제출이 없습니다</PlaceholderTitle>
+              <PlaceholderBody>
+                학생이 풀이 화면에서 <strong>제출</strong>하면 채점 결과가 이 목록에
+                점수·제출자 이름과 함께 쌓입니다. (인증이 없는 MVP라 이 브라우저에서 이뤄진
+                제출만 표시됩니다.)
+              </PlaceholderBody>
+            </PlaceholderBox>
+          ) : (
+            <SubmissionList>
+              {sortedSubmissions.map((submission) => (
+                <SubmissionItem key={submission.id}>
+                  <SubmissionSummary>
+                    <StudentName>{submission.studentName}</StudentName>
+                    <SubmittedAt>{formatTime(submission.result.submittedAt)}</SubmittedAt>
+                    <TestMeta>
+                      테스트 {submission.result.autoTest.passedCount}/
+                      {submission.result.autoTest.totalCount}
+                    </TestMeta>
+                    <ScoreBadge>{Math.round(submission.result.finalScore)}점</ScoreBadge>
+                  </SubmissionSummary>
+                  <Detail>
+                    <DetailSummary>루브릭 항목별 점수·피드백</DetailSummary>
+                    <DetailBody>
+                      <CriterionScoreList>
+                        {submission.result.rubric.scores.map((score) => (
+                          <CriterionScoreRow key={score.criterionId}>
+                            <CriterionScoreDesc>
+                              {criterionLabel(score.criterionId)}
+                            </CriterionScoreDesc>
+                            <CriterionScoreValue>{score.score}점</CriterionScoreValue>
+                          </CriterionScoreRow>
+                        ))}
+                      </CriterionScoreList>
+                      {submission.result.rubric.feedback && (
+                        <FeedbackText>{submission.result.rubric.feedback}</FeedbackText>
+                      )}
+                    </DetailBody>
+                  </Detail>
+                </SubmissionItem>
+              ))}
+            </SubmissionList>
+          )}
         </Panel>
       </Grid>
     </Layout>
@@ -87,6 +141,15 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
 
 function formatWeight(weight: number): string {
   return `${Math.round(weight * 100)}%`;
+}
+
+function formatTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // ── Styled Components ─────────────────────────────────────────────────────
@@ -200,6 +263,111 @@ const PlaceholderBody = styled.p`
   strong {
     color: ${({ theme }) => theme.colors.text};
   }
+`;
+
+const SubmissionList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  overflow-y: auto;
+`;
+
+const SubmissionItem = styled.li`
+  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+`;
+
+const SubmissionSummary = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const StudentName = styled.span`
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const SubmittedAt = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const TestMeta = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const ScoreBadge = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  white-space: nowrap;
+`;
+
+const Detail = styled.details`
+  margin-top: ${({ theme }) => theme.spacing.xs};
+`;
+
+const DetailSummary = styled.summary`
+  cursor: pointer;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const DetailBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding-top: ${({ theme }) => theme.spacing.sm};
+`;
+
+const CriterionScoreList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+`;
+
+const CriterionScoreRow = styled.li`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const CriterionScoreDesc = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const CriterionScoreValue = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.primary};
+  white-space: nowrap;
+`;
+
+const FeedbackText = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.6;
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: pre-wrap;
 `;
 
 const Empty = styled.p`

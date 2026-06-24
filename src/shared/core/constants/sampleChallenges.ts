@@ -71,4 +71,108 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
     createdAt: 0,
     updatedAt: 0,
   },
+  {
+    id: 'sample-counter-decrement',
+    title: '카운터에 "감소" 버튼 바이브코딩',
+    statement: [
+      '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
+      'AI 도우미를 활용해 **"감소" 버튼**을 추가하세요.',
+      '',
+      '### 요구사항',
+      "- `src/App.jsx`에 텍스트가 `감소`인 버튼을 추가한다.",
+      '- 그 버튼을 누르면 카운터가 `1` 줄어든다(음수도 허용).',
+      '- 기존 증가 버튼은 그대로 동작해야 한다.',
+      '',
+      '### 계약 (자동 채점이 의존하는 약속)',
+      "- 감소 버튼의 텍스트는 정확히 `감소` 여야 한다.",
+      '- 빌드 설정(`vite.config.js`)·HTML 셸·`package.json`은 **잠겨 있어** 수정할 수 없다.',
+    ].join('\n'),
+
+    template: VITE_REACT_SAMPLE_TEMPLATE,
+    lockedPaths: [...VITE_REACT_SAMPLE_LOCKED_PATHS],
+    editablePaths: ['src/App.jsx', 'src/index.css'],
+
+    setupCommands: ['npm install'],
+    devCommand: 'npm run dev',
+    testCommand: 'npm test',
+
+    // P2에서 실제 채점 테스트로 대체. 지금은 빈 트리.
+    testFiles: {},
+    rubric: {
+      criteria: [
+        {
+          id: 'decrement-button-exists',
+          description: '"감소" 버튼이 존재하고 클릭하면 카운터가 1 줄어든다.',
+          maxScore: 60,
+        },
+        {
+          id: 'increment-still-works',
+          description: '기존 증가 버튼이 여전히 정상 동작한다.',
+          maxScore: 25,
+        },
+        {
+          id: 'code-quality',
+          description: '상태 관리가 단순하고 불필요한 중복이 없다.',
+          maxScore: 15,
+        },
+      ],
+      weights: { tests: 0.3, rubric: 0.7 },
+    },
+
+    aiPolicy: { ...DEFAULT_AI_POLICY },
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: 'sample-counter-parity',
+    title: '카운터에 짝/홀 표시 바이브코딩',
+    statement: [
+      '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
+      'AI 도우미를 활용해 현재 카운터 값이 **짝수인지 홀수인지** 화면에 표시하세요.',
+      '',
+      '### 요구사항',
+      "- `src/App.jsx`에 현재 값이 짝수면 `짝수`, 홀수면 `홀수`라는 텍스트를 보여준다.",
+      '- 카운터 값이 바뀌면 표시도 즉시 갱신되어야 한다.',
+      '- 기존 증가 버튼은 그대로 동작해야 한다.',
+      '',
+      '### 계약 (자동 채점이 의존하는 약속)',
+      "- 표시 텍스트는 정확히 `짝수` 또는 `홀수` 여야 한다(초기값 0은 `짝수`).",
+      '- 빌드 설정(`vite.config.js`)·HTML 셸·`package.json`은 **잠겨 있어** 수정할 수 없다.',
+    ].join('\n'),
+
+    template: VITE_REACT_SAMPLE_TEMPLATE,
+    lockedPaths: [...VITE_REACT_SAMPLE_LOCKED_PATHS],
+    editablePaths: ['src/App.jsx', 'src/index.css'],
+
+    setupCommands: ['npm install'],
+    devCommand: 'npm run dev',
+    testCommand: 'npm test',
+
+    // P2에서 실제 채점 테스트로 대체. 지금은 빈 트리.
+    testFiles: {},
+    rubric: {
+      criteria: [
+        {
+          id: 'parity-label-correct',
+          description: '현재 값에 따라 `짝수`/`홀수` 텍스트가 정확히 표시된다.',
+          maxScore: 55,
+        },
+        {
+          id: 'updates-on-change',
+          description: '값이 바뀔 때 표시가 즉시 갱신되고 증가 버튼이 정상 동작한다.',
+          maxScore: 30,
+        },
+        {
+          id: 'code-quality',
+          description: '파생 값을 불필요한 상태 없이 단순하게 계산한다.',
+          maxScore: 15,
+        },
+      ],
+      weights: { tests: 0.3, rubric: 0.7 },
+    },
+
+    aiPolicy: { ...DEFAULT_AI_POLICY },
+    createdAt: 0,
+    updatedAt: 0,
+  },
 ];
