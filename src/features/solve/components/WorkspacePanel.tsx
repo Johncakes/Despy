@@ -466,7 +466,9 @@ export function WorkspacePanel({
             </TestToolbar>
 
             <TestBody>
-              {evalErrorMessage ? (
+              {phase === 'error' && errorMessage ? (
+                <TestError>워크스페이스 시작 실패: {errorMessage}</TestError>
+              ) : evalErrorMessage ? (
                 <TestError>{evalErrorMessage}</TestError>
               ) : isRunningEval && !evalResult ? (
                 <TestCentered>

@@ -7,17 +7,19 @@
  * 미리보기를 실시간 갱신한다(P1 핵심). AI 답변의 SEARCH/REPLACE 편집은 현재 파일에서
  * 정확히 일치하는 부분만 교체해 반영한다(handleApplyAiEdits → markdownCode.applyFileEdit).
  *
- * 제출(P3): 상단 바의 '제출'이 자동 테스트 결과 + 변경 파일 + 루브릭을 /api/grade로
- * 보내(useGradeChallenge) 공식 채점을 받고, 결과를 모달(ChallengeGradingResultPanel)로
- * 보여준다. testResult가 없으면 제출 전에 runTests()를 먼저 돌려 자동 테스트 신호를 채운다.
+ * 제출(M4): 상단 바의 '제출'이 자동 테스트 결과 + 변경 파일 + 대화·사용량을
+ *    서버로 보내(useSubmitChallenge → POST /api/challenges/[id]/submissions) 공식 채점을
+ *    받고, 반환된 Submission.result를 모달(ChallengeGradingResultPanel)로 보여준다.
+ *    채점 기준(루브릭)은 클라이언트가 보내지 않고 서버가 저장된 과제로 확정한다(무결성).
+ *    testResult가 없으면 제출 전에 runTests()를 먼저 돌려 자동 테스트 신호를 채운다.
  *
  * 영속(P4): 파일 편집 버퍼(델타)와 AI 사용량(질문/토큰)은 useWorkspace를 통해
  *    challengeId별로 IndexedDB(despy-workspace)에 저장·복원된다 — 새로고침해도
  *    진행이 유지된다(docs/spec-webcontainer.md §9.1).
  *
- * 제출 기록: 채점 성공 시 결과를 로그인 사용자 이름과 함께 submissionStore에 저장해
- *    교수 채점 대시보드(GradingDashboardView)의 데이터 소스가 되게 한다(제출자 신원은
- *    입력칸이 아니라 인증 세션에서 — 위장 방지).
+ * 제출 기록(M4): 제출은 서버가 영속한다 — 제출자 신원은 입력칸이 아니라 인증 세션에서
+ *    오며, 그 결과가 교수 채점 대시보드(GradingDashboardView)의 데이터 소스가 된다.
+ *    studentName은 더 이상 클라이언트가 보내지 않는다(서버 세션이 채움 — 위장 방지).
  *
  * 사용처: app/workspace/[challengeId]/page.tsx
  */
@@ -28,18 +30,15 @@ import { useRouter } from 'next/navigation';
 import styled, { css, keyframes } from 'styled-components';
 import type {
   AutoTestResult,
-  ChallengeGradingRequest,
   ChallengeGradingResult,
-  ChallengeProblem,
+  ChallengeSubmitRequest,
   ProjectFiles,
+  StudentChallenge,
+  SubmissionPromptTurn,
 } from '@/shared/core/types';
 import { Button } from '@/shared/components/ui/Button';
 import { useCurrentUser } from '@/shared/core/queries/authQueries';
-import { useGradeChallenge } from '@/shared/core/queries/gradeQueries';
-import {
-  useSubmissionStore,
-  type SubmissionPromptTurn,
-} from '@/shared/core/stores/submissionStore';
+import { useSubmitChallenge } from '@/shared/core/queries/submissionQueries';
 import { useProctoringMonitor } from '@/shared/lib/hooks/useProctoringMonitor';
 import {
   FullscreenPrompt,
@@ -81,16 +80,25 @@ function collectChangedFiles(
 /** ML 챌린지 제출의 객관 축은 성능 점수(mlScore)다 — 자동 테스트는 비운다(채점에서 무시). */
 const EMPTY_AUTO_TEST: AutoTestResult = { passedCount: 0, totalCount: 0, cases: [] };
 
+/**
+ * 결과 모달의 '점수 산출 내역' 표시용 폴백 가중치 — 학생 DTO에 루브릭(가중치)이 없고
+ * 채점 결과에도 담겨오지 않아, 산출 내역의 축별 기여도를 균등(0.5/0.5)으로 표시한다.
+ * 최종 점수(finalScore)는 서버 확정값을 그대로 보여주므로 이 폴백과 무관하게 정확하다.
+ */
+const FALLBACK_RESULT_WEIGHTS = { tests: 0.5, rubric: 0.5 } as const;
+
 // ── Component ─────────────────────────────────────────────────────────────
 
-export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem }) {
+export function ChallengeSolveView({ challenge }: { challenge: StudentChallenge }) {
   const router = useRouter();
   // ML 챌린지면 평가 설정(MlSpec + 숨긴 test셋)을 워크스페이스에 넘긴다 — dev 서버를
-  // 띄우지 않고 runEvaluation으로 성능을 채점한다. 일반 과제는 undefined.
+  // 띄우지 않고 runEvaluation으로 성능을 채점한다. StudentChallenge에서 ml·testFiles는
+  // kind==='ml'일 때만 존재하므로(타입상 선택), 워크스페이스 과제는 undefined를 넘기고
+  // (동작 불변) ML 과제만 spec+testFiles를 넘긴다(ML은 항상 두 값을 가지므로 ?? {}로 보강).
   const mlConfig = useMemo(
     () =>
       challenge.kind === 'ml' && challenge.ml
-        ? { spec: challenge.ml, testFiles: challenge.testFiles }
+        ? { spec: challenge.ml, testFiles: challenge.testFiles ?? {} }
         : undefined,
     [challenge.kind, challenge.ml, challenge.testFiles],
   );
@@ -106,7 +114,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   const { questionsUsed, tokensUsed, recordAiTurn } = workspace;
   // 제출자 신원은 로그인 세션에서 가져온다 — 학생이 직접 타이핑하지 않는다(위장 방지).
   const { data: currentUser } = useCurrentUser();
-  const grade = useGradeChallenge();
+  const submit = useSubmitChallenge();
   const { log: integrityLog, isFullscreen, requestFullscreen, getLog } = useProctoringMonitor();
 
   // 패널 토글 상태(UI 전용 — 영속 대상 아님)
@@ -243,7 +251,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     try {
       // 객관 축 신호를 준비한다 — ML은 성능 평가(숨긴 test셋), 일반 과제는 자동 테스트.
       let autoTest: AutoTestResult = EMPTY_AUTO_TEST;
-      let mlScore: ChallengeGradingRequest['mlScore'];
+      let mlScore: ChallengeSubmitRequest['mlScore'];
       if (challenge.kind === 'ml' && challenge.ml) {
         // 이미 '성능 점수' 탭에서 평가했으면 그 값을, 아니면 지금 평가를 실행한다.
         const evalRes = evalResult ?? (await runEvaluation());
@@ -270,32 +278,25 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         challenge.template,
         challenge.lockedPaths,
       );
-      const result = await grade.mutateAsync({
-        problemId: challenge.id,
-        statement: challenge.statement,
-        rubric: challenge.rubric,
+      // 서버 제출 — 채점 기준(루브릭·statement·모델)은 보내지 않는다(서버가 저장된
+      // 과제로 채점·영속). 제출 코드·자동 테스트·ML 점수·AI 대화·사용량·감독 로그만
+      // 보낸다. studentName은 서버 세션이 채우므로 클라이언트가 보내지 않는다.
+      const request: ChallengeSubmitRequest = {
         submittedFiles,
         autoTest,
         // ML 챌린지면 성능 점수(객관)를 함께 보내 서버가 합격 판정 + 최종 점수에 반영한다.
         mlScore,
-        // 모델은 과제 AI 정책을 따르되, aiPolicy.systemPrompt(답변 가드레일)는 채점
-        // 가드레일이 아니므로 보내지 않는다 — grader의 기본 채점 프롬프트를 쓴다.
-        model: challenge.aiPolicy.model,
-      });
-      setGradingResult(result);
-      // 채점 결과를 제출 기록으로 저장 → 교수 대시보드 데이터 소스. 제출자 이름은
-      // 로그인 사용자 이름을 쓴다(비로그인 등 예외 시에만 '익명').
-      useSubmissionStore.getState().addSubmission(challenge.id, {
-        id: crypto.randomUUID(),
-        studentName: currentUser?.name.trim() || '익명',
-        result,
-        // 제출 시점의 코드(변경분)와 AI 대화를 함께 저장 → 대시보드에서 열람.
-        submittedFiles,
+        // 제출 시점까지의 AI 대화(프롬프트+응답)와 사용량·감독 로그 → 교수 대시보드 소스.
         prompts: promptsRef.current,
         aiUsage: { questionsUsed, tokensUsed },
-        // 제출 시점 이상행위 로그 — 교수 대시보드 사후 분석용.
         integrityLog: getLog(),
+      };
+      const submission = await submit.mutateAsync({
+        challengeId: challenge.id,
+        request,
       });
+      // 반환된 Submission이 공식 채점 결과(result)를 담는다 — 결과 모달에 그대로 보여준다.
+      setGradingResult(submission.result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setSubmitError(message);
@@ -308,15 +309,14 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     workspace.evalErrorMessage,
     files,
     challenge,
-    grade,
-    currentUser,
+    submit,
     questionsUsed,
     tokensUsed,
     getLog,
   ]);
 
   // 워크스페이스가 준비되어야(테스트/평가 실행 가능) 제출할 수 있다.
-  const isSubmitting = grade.isPending;
+  const isSubmitting = submit.isPending;
   const canSubmit =
     workspace.phase === 'ready' &&
     !isSubmitting &&
@@ -474,8 +474,11 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
       {gradingResult && (
         <ChallengeGradingResultPanel
           result={gradingResult}
-          criteria={challenge.rubric.criteria}
-          weights={challenge.rubric.weights}
+          // 루브릭(criteria·weights)은 채점 기준이라 학생 DTO(StudentChallenge)엔 없지만,
+          // 서버가 채점 결과에 함께 담아주므로(rubricCriteria·weights) 그대로 사용해
+          // 정확한 점수 분해·항목 라벨을 보여준다. 구버전 결과만 폴백한다.
+          criteria={gradingResult.rubricCriteria ?? []}
+          weights={gradingResult.weights ?? FALLBACK_RESULT_WEIGHTS}
           onClose={() => setGradingResult(null)}
         />
       )}

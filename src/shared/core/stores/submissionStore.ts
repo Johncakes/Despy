@@ -20,22 +20,18 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ChallengeGradingResult, IntegrityLog, ProjectFiles } from '@/shared/core/types';
+import type {
+  ChallengeGradingResult,
+  IntegrityLog,
+  ProjectFiles,
+  SubmissionPromptTurn,
+} from '@/shared/core/types';
+
+// SubmissionPromptTurn은 core/types로 승격되었다(M4 — 서버 submissions repo와 공유).
+// 기존 import 경로(이 스토어)를 쓰는 화면 호환을 위해 재노출한다.
+export type { SubmissionPromptTurn };
 
 // ── Types ─────────────────────────────────────────────────────────────────
-
-/** AI 대화 1턴(제출 기록에 보관) — 학생 프롬프트 또는 AI 응답. */
-export interface SubmissionPromptTurn {
-  role: 'user' | 'assistant';
-  /** 학생 프롬프트는 코드 첨부분을 제외한 질문만, AI 응답은 본문 텍스트. */
-  text: string;
-  /**
-   * user 턴 한정 — 이 프롬프트를 **작성한 시점**의 코드 상태(템플릿 대비 변경 파일 델타).
-   * 대시보드가 연속 스냅샷을 비교해 "프롬프트가 만든 변경점(diff)"을 보여준다.
-   * assistant 턴·구버전 기록엔 없을 수 있어 선택.
-   */
-  filesAtSend?: ProjectFiles;
-}
 
 /** 저장되는 제출 1건 — 채점 결과 + 식별 정보(이름/별명) + 제출 코드·프롬프트 스냅샷. */
 export interface StoredSubmission {

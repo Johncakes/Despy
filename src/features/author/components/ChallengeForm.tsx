@@ -42,6 +42,8 @@ interface ChallengeFormProps {
   initialChallenge: ChallengeProblem | null;
   onSubmit: (challenge: ChallengeProblem) => void;
   onDelete?: () => void;
+  /** 저장(생성/수정) 진행 중 여부. 버튼 비활성·라벨에 반영한다. */
+  isSaving?: boolean;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ export function ChallengeForm({
   initialChallenge,
   onSubmit,
   onDelete,
+  isSaving = false,
 }: ChallengeFormProps) {
   const { draft, updateField } = useChallengeDraft(initialChallenge);
 
@@ -358,12 +361,12 @@ export function ChallengeForm({
 
       <Footer>
         {onDelete && (
-          <Button type="button" variant="ghost" onClick={onDelete}>
+          <Button type="button" variant="ghost" onClick={onDelete} disabled={isSaving}>
             삭제
           </Button>
         )}
-        <Button type="submit" variant="primary" disabled={!isValid}>
-          저장
+        <Button type="submit" variant="primary" disabled={!isValid || isSaving}>
+          {isSaving ? '저장 중…' : '저장'}
         </Button>
       </Footer>
     </Form>

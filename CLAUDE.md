@@ -92,8 +92,11 @@ src/
 │   ├── admin/users/page.tsx      사용자/역할 관리 진입점 (관리자 전용 — features/admin)
 │   └── api/                      백엔드 (키 은닉·AI 프록시·채점·인증)
 │       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage) — requireUser 가드
-│       ├── grade/route.ts        과제 공식 채점 (AI 루브릭 정성 채점 + 가중합, 피벗 P3) — requireUser 가드
+│       ├── grade/route.ts        과제 공식 채점 (gradeChallenge 헬퍼 공유 — 레거시, 클라가 보낸 rubric 채점, M4로 제출 POST에 이전 중) — requireUser 가드
 │       ├── grade/algorithm/route.ts 알고리즘 공식 채점 (AI 정성 판정 — Judge0 대체, P5) — requireUser 가드
+│       ├── challenges/{route.ts,[challengeId]/route.ts}  과제 서버 CRUD (M4 — 역할별 DTO·소유권 가드. 학생은 published만 StudentChallenge)
+│       ├── challenges/[challengeId]/submissions/route.ts  제출 목록(GET 부모 출제자만)·생성(POST 서버 채점+영속) (M4)
+│       ├── submissions/{[submissionId]/route.ts,mine/route.ts}  단일 제출(본인/출제자/admin)·내 제출(마이페이지) (M4)
 │       ├── auth/{signup,login,logout,me}/route.ts  이메일/비번 + JWT 세션
 │       └── admin/users/{route.ts,[userId]/route.ts}  사용자 목록·역할 변경 (admin)
 │
@@ -117,16 +120,16 @@ src/
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
-    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체) · authApi.ts (로그인/가입/로그아웃/me·관리자 사용자 fetch)
+    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3 — M4로 제출 mutation에 이전, dormant) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체) · authApi.ts (로그인/가입/로그아웃/me·관리자 사용자 fetch) · challengeApi.ts (과제 CRUD fetch, M4) · submissionApi.ts (제출 생성·조회 fetch, M4)
     │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량+이상행위 로그(integrityLog) 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (코드/언어/AI 사용량 per-problem), solveHistoryStore.ts (알고리즘 채점 결과 이력 per-problem — 마이페이지 소스)
-    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), authQueries.ts (useCurrentUser·login/signup/logout·관리자 사용자/역할), queryKeys.ts (auth·admin)
+    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3 — M4로 useSubmitChallenge에 이전, dormant), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), authQueries.ts (useCurrentUser·login/signup/logout·관리자 사용자/역할), challengeQueries.ts (과제 — useChallenges·useChallengeForSolve|Edit·use{Create,Update,Delete}Challenge, M4), submissionQueries.ts (제출 — useChallengeSubmissions·useMySubmissions·useSubmitChallenge, M4), queryKeys.ts (auth·admin·challenges·submissions)
     │   ├── types/                index.ts (ChallengeProblem(+kind·ml)·ChallengeKind·MlSpec·MlMetric·MlEvalResult·MlGradingResult·GradingRubric·ChallengeGradingRequest(+mlScore)·ChallengeGradingResult(+ml)·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열 / 인증 UserRole·AuthUser)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
     │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT). 백엔드 템플릿은 db 모듈(파일 백업 db.json+인메모리, createApp(db) DI)·요청 로깅 미들웨어(stdout 센티넬→API 로그)·node --watch 자동 재시작 포함. **ML 챌린지 템플릿**(ML_CLASSIFICATION_TEMPLATE·ML_REGRESSION_TEMPLATE + ML_*_TEST_FILES 숨긴 test셋 + ML_*_LOCKED_PATHS): pure @tensorflow/tfjs(tfjs-node 불가)로 dev 서버 없이 학습·평가, 잠긴 eval.mjs가 고정 seed로 새로 학습 후 __DESPY_SCORE__ 센티넬로 점수 출력. 학생은 model.mjs·train.mjs만 편집)
     ├── lib/                      재사용 로직
     │   ├── auth/                 password.ts(bcryptjs 해시) · jwt.ts(jose 서명·검증 + SESSION_COOKIE) · session.ts(쿠키 발급/해제 · getCurrentUser·requireUser·requireRole 가드)
-    │   ├── db/                   mongodb.ts (연결 싱글턴 — lazy, getClient/getDb) · users.ts (users 컬렉션 리포지토리 — passwordHash 제외 매핑)
-    │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합(ML은 objectiveRatioOverride로 성능 비율 대체)·알고리즘 정규화) · mlScore.ts(ML 지표 방향·합격 판정(accuracy≥/rmse≤)·표시·[0,1] 환산 — UI·채점 공용) · requestValidation.ts(요청 검증·mlScore) · index.ts(교체점)
+    │   ├── db/                   mongodb.ts (연결 싱글턴 — lazy, getClient/getDb) · users.ts (users 컬렉션 — passwordHash 제외 매핑) · challenges.ts (challenges 컬렉션 — 역할별 DTO toAuthor/toStudentChallenge로 rubric·testFiles 제거, 화이트리스트 update, M4) · submissions.ts (submissions 컬렉션 — 채점결과 임베드, challengeId·userId 인덱스, M4)
+    │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합(ML은 objectiveRatioOverride로 성능 비율 대체)·알고리즘 정규화) · mlScore.ts(ML 지표 방향·합격 판정(accuracy≥/rmse≤)·표시·[0,1] 환산 — UI·채점 공용) · requestValidation.ts(요청 검증·mlScore) · gradeChallenge.ts(과제 종합 채점 헬퍼 — /api/grade·제출 POST 공유, 서버가 저장된 rubric으로 채점, M4) · index.ts(교체점)
     │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피 · readContainerFile/watchContainerFile은 db.json을 fs.watch→DB 상태 라이브 뷰 · runScoreEval은 ML eval(evalCommand)을 일회 실행해 __DESPY_SCORE__ 센티넬 파싱→성능 점수, 타임아웃·seed env(DESPY_SEED) 주입) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출), lineDiff.ts (라인/파일트리 diff — 대시보드 코드 변경점)
     │   └── hooks/                useHasMounted.ts (hydration 가드), useProctoringMonitor.ts (시험 감독 — 탭이탈·붙여넣기·전체화면이탈 감지·IntegrityLog 제공 · docs/spec-anti-cheating.md)
@@ -183,13 +186,13 @@ interface ListProps {
 - **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — 인증/사용자 영속에 사용 중. 새 도메인 저장소를 추가할 땐 별도 논의한다(2026-06-24 백엔드 최소화 해제)
 
 **현재 구현**
-- 서버 데이터: 채점은 **mutation** — 과제는 `useGradeChallenge`(`gradeQueries.ts` → `/api/grade`),
-  알고리즘은 `useGradeAlgorithm`(`algorithmGradeQueries.ts` → `/api/grade/algorithm`).
-  인증/사용자는 `authQueries.ts` — 현재 사용자는 `useCurrentUser`(query, `queryKeys.auth.me`),
-  로그인/가입/로그아웃·관리자 사용자/역할은 mutation. **현재 사용자(서버 상태)는 Query가 단일 출처**(별도 auth store 없음).
-  `queryKeys.ts`는 `auth.me`·`admin.users`를 가진다.
-  AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 — 채점결과+제출코드+AI프롬프트, 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량), `solveHistoryStore`(문제별 마지막 채점 결과 — 마이페이지 소스).
+- 서버 데이터:
+  - **과제·제출 (M4 — 영속 이전, 2026-06-25)**: 과제는 `challengeQueries.ts`(`useChallenges`·`useChallengeForSolve|Edit`·`use{Create,Update,Delete}Challenge` → `/api/challenges`), 제출은 `submissionQueries.ts`(`useChallengeSubmissions`(교수 대시보드)·`useMySubmissions`(마이페이지)·`useSubmitChallenge`(서버 채점+영속) → `/api/challenges/[id]/submissions`·`/api/submissions/*`). 채점은 서버가 **저장된 rubric**으로 확정한다(클라 기준 불신뢰). 민감 재료(rubric·testFiles[워크스페이스])는 학생 DTO에서 제거. → **이로써 `challengeStore`·`submissionStore`는 dormant**(소비처 전부 Query로 이전, 최종 정리 단계에서 삭제 예정).
+  - 알고리즘 채점은 **mutation** `useGradeAlgorithm`(`algorithmGradeQueries.ts` → `/api/grade/algorithm`). (`useGradeChallenge`/`gradeQueries.ts`/`gradeApi.ts`는 M4로 `useSubmitChallenge`에 이전 — dormant. `/api/grade`는 `gradeChallenge` 헬퍼 공유 레거시.)
+  - 인증/사용자는 `authQueries.ts` — 현재 사용자는 `useCurrentUser`(query, `queryKeys.auth.me`), 로그인/가입/로그아웃·관리자 사용자/역할은 mutation. **현재 사용자(서버 상태)는 Query가 단일 출처**(별도 auth store 없음).
+  - `queryKeys.ts`는 `auth`·`admin`·`challenges`·`submissions`를 가진다.
+  - AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
+- 클라이언트 상태: `challengeStore`·`submissionStore`(**M4로 서버 이전 — dormant, 최종 삭제 대기**), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량), `solveHistoryStore`(문제별 마지막 채점 결과 — 마이페이지 소스).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)

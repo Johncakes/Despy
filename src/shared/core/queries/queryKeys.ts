@@ -22,5 +22,22 @@ export const queryKeys = {
     /** 전체 사용자 목록(/api/admin/users) */
     users: ['admin', 'users'] as const,
   },
-  // 도메인별 query key를 여기에 추가한다. (예: exams, problems, submissions)
+  challenges: {
+    /** 과제 목록(/api/challenges, 역할별 필터) */
+    all: ['challenges'] as const,
+    /** 단일 과제(편집용 — 전체 필드, /api/challenges/[id]) */
+    detail: (id: string) => ['challenges', id] as const,
+    /** 단일 과제(풀이용 — 학생 DTO). detail과 응답 shape가 달라 키를 분리한다. */
+    solve: (id: string) => ['challenges', id, 'solve'] as const,
+  },
+  submissions: {
+    /** 특정 과제의 제출 목록(/api/challenges/[id]/submissions — 교수 대시보드) */
+    byChallenge: (challengeId: string) =>
+      ['submissions', 'challenge', challengeId] as const,
+    /** 내 제출 목록(/api/submissions/mine — 마이페이지) */
+    mine: ['submissions', 'mine'] as const,
+    /** 단일 제출(/api/submissions/[id]) */
+    detail: (id: string) => ['submissions', id] as const,
+  },
+  // 도메인별 query key를 여기에 추가한다. (예: problems — 알고리즘, Phase 3)
 } as const;

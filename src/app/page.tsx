@@ -2,8 +2,9 @@
  * page.tsx — 홈 (역할 진입 + 문제 목록)
  *
  * 교수 모드(/author)로 가거나, 출제된 문제를 골라 풀이 화면(/solve/[id])으로
- * 진입하는 시작 화면. 문제 목록은 problemStore(localStorage)에서 읽으므로
- * 마운트 이후에 렌더한다. 도메인 로직은 두지 않고 라우팅 진입점 역할만 한다.
+ * 진입하는 시작 화면. 웹 문제 목록은 서버(useChallenges, 역할별 필터)에서 읽고,
+ * 알고리즘 문제 목록은 problemStore(localStorage)에서 읽으므로 마운트 이후에 렌더한다.
+ * 도메인 로직은 두지 않고 라우팅 진입점 역할만 한다.
  *
  * 사용처: Next.js App Router '/' 경로
  */
@@ -11,16 +12,19 @@
 
 import Link from 'next/link';
 import styled from 'styled-components';
-import { useChallengeStore } from '@/shared/core/stores/challengeStore';
+import { useChallenges } from '@/shared/core/queries/challengeQueries';
 import { useProblemStore } from '@/shared/core/stores/problemStore';
 import { useHasMounted } from '@/shared/lib/hooks/useHasMounted';
 import { Button } from '@/shared/components/ui/Button';
-import { Panel } from '@/shared/components/ui/Panel';
 import { Navbar } from '@/shared/components/ui/Navbar';
 
 export default function HomePage() {
   const hasMounted = useHasMounted();
-  const challenges = useChallengeStore((state) => state.challenges);
+  const {
+    data: challenges,
+    isLoading: isChallengesLoading,
+    isError: isChallengesError,
+  } = useChallenges();
   const problems = useProblemStore((state) => state.problems);
 
   return (
@@ -35,25 +39,24 @@ export default function HomePage() {
               <SectionDesc>브라우저 내 WebContainer 가상 환경에서 실시간 빌드·실행 및 AI 정성 채점을 평가합니다.</SectionDesc>
             </SectionHeader>
             <ItemGrid>
-              {!hasMounted && <LoadingText>문제를 불러오는 중…</LoadingText>}
-              {hasMounted && challenges.map((challenge) => (
+              {isChallengesLoading && <LoadingText>문제를 불러오는 중…</LoadingText>}
+              {isChallengesError && (
+                <EmptyState>웹 문제 목록을 불러오지 못했습니다.</EmptyState>
+              )}
+              {!isChallengesLoading && !isChallengesError && challenges?.map((challenge) => (
                 <ChallengeCard key={challenge.id}>
                   <CardMeta>
                     <TypeBadge $type="web">WEB</TypeBadge>
-                    <ModelName>{challenge.aiPolicy.model}</ModelName>
                   </CardMeta>
                   <CardTitle>{challenge.title || '(제목 없음)'}</CardTitle>
                   <CardFooter>
-                    <QuotaInfo>
-                      질문 {challenge.aiPolicy.maxQuestions}회 / {challenge.aiPolicy.maxTokens} 토큰 한도
-                    </QuotaInfo>
                     <Link href={`/workspace/${challenge.id}`}>
                       <ActionButton variant="primary">풀기 →</ActionButton>
                     </Link>
                   </CardFooter>
                 </ChallengeCard>
               ))}
-              {hasMounted && challenges.length === 0 && (
+              {!isChallengesLoading && !isChallengesError && challenges?.length === 0 && (
                 <EmptyState>출제된 웹 문제가 없습니다.</EmptyState>
               )}
             </ItemGrid>

@@ -13,16 +13,15 @@ import Link from 'next/link';
 import styled, { css, useTheme } from 'styled-components';
 import { useHasMounted } from '@/shared/lib/hooks/useHasMounted';
 import { useCurrentUser } from '@/shared/core/queries/authQueries';
+import { useChallenges } from '@/shared/core/queries/challengeQueries';
+import { useMySubmissions } from '@/shared/core/queries/submissionQueries';
 import { useProblemStore } from '@/shared/core/stores/problemStore';
-import { useChallengeStore } from '@/shared/core/stores/challengeStore';
 import { useSolveSessionStore } from '@/shared/core/stores/solveSessionStore';
 import { useSolveHistoryStore } from '@/shared/core/stores/solveHistoryStore';
-import { useSubmissionStore } from '@/shared/core/stores/submissionStore';
 import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
 import { Navbar } from '@/shared/components/ui/Navbar';
-import type { GradingResult, Problem, UserRole } from '@/shared/core/types';
+import type { GradingResult, Problem, Submission, UserRole } from '@/shared/core/types';
 import type { SolveSession } from '@/shared/core/stores/solveSessionStore';
-import type { StoredSubmission } from '@/shared/core/stores/submissionStore';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -145,11 +144,11 @@ function ProblemCard({ problem, session, result }: ProblemCardProps) {
 interface SubmissionRowProps {
   challengeTitle: string;
   challengeId: string;
-  submission: StoredSubmission;
+  submission: Submission;
 }
 
 function SubmissionRow({ challengeTitle, challengeId, submission }: SubmissionRowProps) {
-  const { finalScore, autoTest, submittedAt } = submission.result;
+  const { finalScore, autoTest } = submission.result;
   return (
     <SubRow>
       <SubChallenge href={`/workspace/${challengeId}`}>{challengeTitle}</SubChallenge>
@@ -162,7 +161,7 @@ function SubmissionRow({ challengeTitle, challengeId, submission }: SubmissionRo
       <SubMeta>
         <span>{submission.studentName || '익명'}</span>
         <MetaDot />
-        <span>{formatRelativeTime(submittedAt)}</span>
+        <span>{formatRelativeTime(submission.createdAt)}</span>
         {submission.aiUsage && (
           <>
             <MetaDot />
@@ -183,8 +182,14 @@ export function MyPageView() {
   const problems = useProblemStore((state) => state.problems);
   const sessions = useSolveSessionStore((state) => state.sessions);
   const gradingResults = useSolveHistoryStore((state) => state.results);
-  const challenges = useChallengeStore((state) => state.challenges);
-  const allSubmissions = useSubmissionStore((state) => state.submissions);
+
+  // 웹 문제(과제) 제출·문제 목록은 서버에서 읽는다(로컬 스토어 대체).
+  const {
+    data: mySubmissions,
+    isLoading: isSubmissionsLoading,
+    isError: isSubmissionsError,
+  } = useMySubmissions();
+  const { data: challenges } = useChallenges();
 
   // 문제별 상태 계산
   const problemItems = problems.map((problem) => {
@@ -197,13 +202,11 @@ export function MyPageView() {
     (a, b) => STATUS_CONFIG[a.status].order - STATUS_CONFIG[b.status].order,
   );
 
-  // 모든 제출을 최신순 정렬
-  const challengeMap = Object.fromEntries(challenges.map((c) => [c.id, c]));
-  const allSubmissionEntries = Object.entries(allSubmissions)
-    .flatMap(([challengeId, subs]) =>
-      subs.map((submission) => ({ challengeId, submission })),
-    )
-    .sort((a, b) => b.submission.result.submittedAt - a.submission.result.submittedAt);
+  // 모든 제출을 최신순 정렬 (서버는 challengeId별이 아닌 평면 목록을 반환)
+  const challengeMap = Object.fromEntries((challenges ?? []).map((c) => [c.id, c]));
+  const allSubmissionEntries = (mySubmissions ?? [])
+    .map((submission) => ({ challengeId: submission.challengeId, submission }))
+    .sort((a, b) => b.submission.createdAt - a.submission.createdAt);
 
   // 통계 계산
   const triedCount = problemItems.filter(({ session }) => session !== null).length;
@@ -298,7 +301,11 @@ export function MyPageView() {
                   웹 문제 제출 이력
                   <SectionCount>{totalSubmissions}건</SectionCount>
                 </SectionTitle>
-                {allSubmissionEntries.length === 0 ? (
+                {isSubmissionsLoading ? (
+                  <EmptyMsg>제출 이력을 불러오는 중…</EmptyMsg>
+                ) : isSubmissionsError ? (
+                  <EmptyMsg>제출 이력을 불러오지 못했습니다.</EmptyMsg>
+                ) : allSubmissionEntries.length === 0 ? (
                   <EmptyMsg>제출한 웹 문제가 없습니다.</EmptyMsg>
                 ) : (
                   <SubmissionTable>

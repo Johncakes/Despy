@@ -12,18 +12,13 @@
  * 사용처: features/solve 제출 플로우(ChallengeSolveView → useGradeChallenge → gradeApi, P3 연결)
  */
 import { grader } from '@/shared/lib/grader';
-import { computeFinalScore } from '@/shared/lib/grader/score';
-import { isMlPassing, mlScoreRatio } from '@/shared/lib/grader/mlScore';
+import { gradeChallengeSubmission } from '@/shared/lib/grader/gradeChallenge';
 import {
   validateGradeRequest,
   asGradeRequest,
 } from '@/shared/lib/grader/requestValidation';
 import { requireUser, authErrorToResponse } from '@/shared/lib/auth/session';
 import { logger } from '@/shared/lib/utils/logger';
-import type {
-  ChallengeGradingResult,
-  MlGradingResult,
-} from '@/shared/core/types';
 
 export const runtime = 'nodejs';
 
@@ -65,48 +60,20 @@ export async function POST(req: Request): Promise<Response> {
   // 던지면 본문 없는 500이 되어 클라이언트가 사유를 알 수 없으므로, 여기서 잡아
   // 읽을 수 있는 메시지와 함께 502(상위 서비스 실패)로 돌려준다.
   try {
-    const rubricResult = await grader.gradeRubric({
+    // 채점 로직은 제출 생성 라우트(/api/challenges/[id]/submissions)와 gradeChallenge
+    // 헬퍼로 공유한다. 단 이 레거시 라우트는 클라이언트가 보낸 rubric을 그대로 채점한다 —
+    // 서버 권위 채점은 제출 POST로 이전 중이다(M4).
+    const result = await gradeChallengeSubmission({
+      problemId: body.problemId,
       statement: body.statement,
       rubric: body.rubric,
       submittedFiles: body.submittedFiles,
       diff: body.diff,
       autoTest: body.autoTest,
-      model: body.model ?? '',
+      mlScore: body.mlScore,
+      model: body.model,
       systemPrompt: body.systemPrompt,
     });
-
-    // ML 챌린지면 성능 점수(객관)를 최종 점수의 객관 축으로 환산해 가중합에 넣고,
-    // 합격 여부(metric 방향에 따른 임계값 비교)와 함께 결과에 담는다. 워크스페이스
-    // 과제면 mlScore가 없어 기존대로 자동 테스트 통과율이 객관 축이 된다.
-    let ml: MlGradingResult | undefined;
-    let objectiveRatioOverride: number | undefined;
-    if (body.mlScore) {
-      const { metric, value, passThreshold } = body.mlScore;
-      ml = {
-        metric,
-        value,
-        passThreshold,
-        passed: isMlPassing(metric, value, passThreshold),
-      };
-      objectiveRatioOverride = mlScoreRatio(metric, value, passThreshold);
-    }
-
-    const finalScore = computeFinalScore(
-      body.autoTest,
-      rubricResult,
-      body.rubric.weights,
-      objectiveRatioOverride,
-    );
-
-    const result: ChallengeGradingResult = {
-      problemId: body.problemId,
-      autoTest: body.autoTest,
-      rubric: rubricResult,
-      ml,
-      finalScore,
-      submittedAt: Date.now(),
-    };
-
     return Response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

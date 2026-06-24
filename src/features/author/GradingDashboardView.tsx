@@ -7,10 +7,10 @@
  * 타임라인·제출 코드)으로 그 학생의 상세를 넓은 폭에서 확인한다. 채점 기준(점수 모델·
  * 루브릭·AI정책)도 헤더 버튼으로 띄우는 모달로 분리해 목록 화면을 비교에 집중시킨다.
  *
- * ⚠️ MVP 한계: 인증·교수/학생 분리·서버 집계는 범위 밖이라, 이 목록은 **이 브라우저에서
- *    이뤄진 제출들**이며 제출자 식별은 입력한 이름/별명에 의존한다(submissionStore 참조).
+ * 제출자 식별은 인증된 userId로 하며, studentName은 제출 시점 표시용 스냅샷이다.
  *
- * 과제는 props로 주입받는다(DI). 제출 목록은 challengeId로 submissionStore에서 조회한다.
+ * 과제는 props로 주입받는다(DI). 제출 목록은 challengeId로 서버에서 조회한다
+ * (useChallengeSubmissions — 출제자만 성공). 조회 중·실패 상태를 안내한다.
  *
  * 사용처: app/author/challenge/[challengeId]/submissions/page.tsx
  */
@@ -19,12 +19,13 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import styled from 'styled-components';
-import type { ChallengeProblem, ProjectFiles } from '@/shared/core/types';
-import {
-  useSubmissionStore,
-  type StoredSubmission,
-  type SubmissionPromptTurn,
-} from '@/shared/core/stores/submissionStore';
+import type {
+  ChallengeProblem,
+  ProjectFiles,
+  Submission,
+  SubmissionPromptTurn,
+} from '@/shared/core/types';
+import { useChallengeSubmissions } from '@/shared/core/queries/submissionQueries';
 import {
   diffFileSets,
   type DiffLineType,
@@ -136,7 +137,7 @@ function medianOf(sorted: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function computeStats(subs: StoredSubmission[]): SubmissionStats {
+function computeStats(subs: Submission[]): SubmissionStats {
   if (subs.length === 0) {
     return { count: 0, avg: 0, median: 0, max: 0, avgTestRate: 0, medianQuestions: 0 };
   }
@@ -170,7 +171,7 @@ const SCORE_BUCKETS = [
   { label: '90–100', min: 90, max: 100 },
 ];
 
-function scoreHistogram(subs: StoredSubmission[]): { label: string; count: number }[] {
+function scoreHistogram(subs: Submission[]): { label: string; count: number }[] {
   return SCORE_BUCKETS.map((bucket) => ({
     label: bucket.label,
     count: subs.filter((s) => {
@@ -181,7 +182,7 @@ function scoreHistogram(subs: StoredSubmission[]): { label: string; count: numbe
 }
 
 /** 한 루브릭 항목의 제출 평균 점수(소수 1자리). 채점한 제출이 없으면 0. */
-function criterionAverage(subs: StoredSubmission[], criterionId: string): number {
+function criterionAverage(subs: Submission[], criterionId: string): number {
   let sum = 0;
   let n = 0;
   for (const s of subs) {
@@ -194,7 +195,7 @@ function criterionAverage(subs: StoredSubmission[], criterionId: string): number
   return n > 0 ? Math.round((sum / n) * 10) / 10 : 0;
 }
 
-function sortSubmissions(subs: StoredSubmission[], sortBy: SortKey): StoredSubmission[] {
+function sortSubmissions(subs: Submission[], sortBy: SortKey): Submission[] {
   return [...subs].sort((a, b) => {
     switch (sortBy) {
       case 'scoreDesc':
@@ -219,11 +220,14 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
     0,
   );
 
-  // 이 과제의 제출 목록(없으면 undefined → 빈 배열은 selector 밖에서 만들어 참조 안정 유지).
-  const storedSubmissions = useSubmissionStore(
-    (state) => state.submissions[challenge.id],
-  );
-  const submissions = storedSubmissions ?? [];
+  // 이 과제의 제출 목록(서버 조회 — 출제자만 성공). 로딩 중엔 data가 undefined라 빈 배열로 본다.
+  const {
+    data: fetchedSubmissions,
+    isLoading: isSubmissionsLoading,
+    isError: isSubmissionsError,
+    error: submissionsError,
+  } = useChallengeSubmissions(challenge.id);
+  const submissions = fetchedSubmissions ?? [];
 
   // 정렬·이름 필터(목록 상호작용).
   const [sortBy, setSortBy] = useState<SortKey>('recent');
@@ -276,13 +280,24 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
         </FormulaInline>
       </Header>
 
-      {submissions.length === 0 ? (
+      {isSubmissionsLoading ? (
+        <PlaceholderBox>
+          <PlaceholderTitle>제출을 불러오는 중…</PlaceholderTitle>
+        </PlaceholderBox>
+      ) : isSubmissionsError ? (
+        <PlaceholderBox>
+          <PlaceholderTitle>제출을 불러오지 못했습니다</PlaceholderTitle>
+          <PlaceholderBody>
+            {submissionsError?.message ??
+              '잠시 후 다시 시도해 주세요. 출제자만 이 과제의 제출을 조회할 수 있습니다.'}
+          </PlaceholderBody>
+        </PlaceholderBox>
+      ) : submissions.length === 0 ? (
         <PlaceholderBox>
           <PlaceholderTitle>아직 제출이 없습니다</PlaceholderTitle>
           <PlaceholderBody>
             학생이 풀이 화면에서 <strong>제출</strong>하면 채점 결과가 이 화면에
-            점수·제출자 이름과 함께 쌓입니다. (인증이 없는 MVP라 이 브라우저에서 이뤄진
-            제출만 표시됩니다.)
+            점수·제출자 이름과 함께 쌓입니다.
           </PlaceholderBody>
         </PlaceholderBox>
       ) : (
@@ -542,7 +557,7 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
 // ── 제출 상세(모달 본문) ──────────────────────────────────────────────────────
 
 interface SubmissionDetailProps {
-  submission: StoredSubmission;
+  submission: Submission;
   activeTab: DetailTab;
   onTabChange: (tab: DetailTab) => void;
   criterionLabel: (criterionId: string) => string;

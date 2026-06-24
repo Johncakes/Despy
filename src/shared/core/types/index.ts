@@ -181,6 +181,72 @@ export interface ChallengeProblem {
   // ── AI 통제 (기존 재활용) ──
   aiPolicy: AiPolicy;
 
+  // ── 서버 영속 (M4) ──
+  /** 출제자(교수) id = AuthUser.id. 서버 영속(M4) 도입 필드. 클라 전환 중 optional, 서버는 항상 채운다. */
+  authorId?: string;
+  /** 출제 상태. 학생에겐 'published'만 노출. M4 도입 — 클라 전환 중 optional, 서버는 항상 채운다. */
+  status?: ChallengeStatus;
+
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 과제 출제 상태. 학생 목록/조회는 'published'만 노출한다. */
+export type ChallengeStatus = 'draft' | 'published' | 'archived';
+
+/**
+ * 학생 풀이 화면에 내려가는 과제 DTO (서버가 ChallengeDoc에서 매핑).
+ *
+ * rubric(채점 기준)은 항상 제거한다 — 채점은 서버가 저장된 과제로 확정한다.
+ * testFiles(숨긴 test셋)는 워크스페이스 과제에선 제거하지만, **ML 과제는 클라이언트
+ * 성능평가(runEvaluation)에 필요해 interim으로 노출한다**(ML 서버평가는 후속 — 결정 A,
+ * docs/spec-ml-challenge.md §5·§8). 이때 ml도 full MlSpec이다.
+ *
+ * ⚠️ aiPolicy.systemPrompt는 **아직 유지**한다 — 클라이언트 AiChatPanel이 /api/agent로
+ *    직접 주입하기 때문이다. systemPrompt 서버 주입(클라 비노출)은 M5(민감정보 서버화)에서
+ *    /api/agent가 저장된 과제에서 로드하도록 분리한다.
+ */
+export interface StudentChallenge {
+  id: string;
+  title: string;
+  statement: string;
+  kind: ChallengeKind;
+  /** ML 과제 전용 — 클라 성능평가용 full MlSpec(interim). 워크스페이스 과제엔 없음. */
+  ml?: MlSpec;
+  /** ML 과제 전용 — 클라 성능평가용 숨긴 test셋(interim). 워크스페이스 과제엔 없음. */
+  testFiles?: ProjectFiles;
+  template: ProjectFiles;
+  lockedPaths: string[];
+  editablePaths: string[];
+  setupCommands: string[];
+  devCommand: string;
+  testCommand: string;
+  /** AI 정책. systemPrompt 포함(M5에서 서버 주입으로 분리 예정 — 위 ⚠️ 참조). */
+  aiPolicy: AiPolicy;
+  authorId: string;
+  status: ChallengeStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 과제 생성/수정 입력 — 서버가 채우는 식별/상태/시각 필드를 제외한 출제 내용. */
+export type ChallengeInput = Omit<
+  ChallengeProblem,
+  'id' | 'authorId' | 'status' | 'createdAt' | 'updatedAt'
+>;
+
+/**
+ * 과제 목록 표시용 공통 필드(역할별 DTO의 교집합).
+ * 홈·출제 목록의 카드는 이 필드들만 쓰므로, 학생(StudentChallenge)·교수(ChallengeProblem)
+ * 어느 응답이든 이 형태로 받아 다룬다.
+ */
+export interface ChallengeSummary {
+  id: string;
+  title: string;
+  statement: string;
+  kind: ChallengeKind;
+  status?: ChallengeStatus;
+  authorId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -311,9 +377,86 @@ export interface ChallengeGradingResult {
   rubric: RubricGradingResult;
   /** ML 챌린지 성능 채점 결과(객관). 워크스페이스 과제면 생략. */
   ml?: MlGradingResult;
+  /**
+   * 채점에 쓰인 가중치(tests·rubric). 학생 결과 패널은 rubric을 갖지 않으므로(서버 채점)
+   * 점수 분해율 표시를 위해 결과에 함께 담는다. 구버전 결과엔 없을 수 있어 선택.
+   */
+  weights?: GradingRubric['weights'];
+  /**
+   * 채점 기준 항목(설명·만점). 결과 패널이 criterionId를 사람이 읽는 라벨로 매핑하는 데 쓴다.
+   * 구버전 결과엔 없을 수 있어 선택.
+   */
+  rubricCriteria?: RubricCriterion[];
   /** weights로 가중합한 최종 점수(0~100) */
   finalScore: number;
   submittedAt: number;
+}
+
+// ── 제출 (Submission) — 서버 영속 (M4) ────────────────────────────────────────
+
+/** AI 대화 1턴(제출 기록에 보관) — 학생 프롬프트 또는 AI 응답. */
+export interface SubmissionPromptTurn {
+  role: 'user' | 'assistant';
+  /** 학생 프롬프트는 코드 첨부분을 제외한 질문만, AI 응답은 본문 텍스트. */
+  text: string;
+  /**
+   * user 턴 한정 — 이 프롬프트를 작성한 시점의 코드 상태(템플릿 대비 변경 파일 델타).
+   * 대시보드가 연속 스냅샷을 비교해 "프롬프트가 만든 변경점(diff)"을 보여준다.
+   * assistant 턴·구버전 기록엔 없을 수 있어 선택.
+   */
+  filesAtSend?: ProjectFiles;
+}
+
+/**
+ * 제출 1건 (서버 도메인) — 과제 채점 결과 + 제출자 식별 + 제출 코드·프롬프트 스냅샷.
+ *
+ * 교수 채점 대시보드(GradingDashboardView)의 데이터 소스다. 식별은 인증된 userId
+ * (=AuthUser.id)로 하며, studentName은 제출 시점 표시용 스냅샷일 뿐 신원으로 신뢰하지
+ * 않는다(M4 — 자유텍스트 studentName 신원을 대체).
+ */
+export interface Submission {
+  id: string;
+  challengeId: string;
+  /** 제출 학생 id = AuthUser.id (소유권·접근 통제의 기준). */
+  userId: string;
+  /** 제출 시점 AuthUser.name 스냅샷(표시용, 신원 신뢰 X). */
+  studentName: string;
+  /** 공식 채점 결과(서버 /api/grade 확정). */
+  result: ChallengeGradingResult;
+  /** 제출 시 학생이 변경한 코드(경로→내용). 구버전 기록엔 없을 수 있어 선택. */
+  submittedFiles?: ProjectFiles;
+  /** 제출 시점까지의 AI 대화(프롬프트+응답). 구버전 기록엔 없을 수 있어 선택. */
+  prompts?: SubmissionPromptTurn[];
+  /** 제출 시점 AI 사용량(질문 횟수·누적 토큰). */
+  aiUsage?: { questionsUsed: number; tokensUsed: number };
+  /** 시험 감독 로그 — 탭 이탈·외부 붙여넣기·전체화면 이탈 카운트. */
+  integrityLog?: IntegrityLog;
+  /** 제출 시각(ms). */
+  createdAt: number;
+}
+
+/**
+ * 제출 생성 요청 (학생 → POST /api/challenges/[challengeId]/submissions).
+ *
+ * 서버가 **저장된 과제의 rubric**으로 채점하므로 클라이언트는 채점 기준(rubric·systemPrompt)을
+ * 보내지 않는다(무결성 — 클라가 보낸 점수/기준 불신뢰). 객관 신호(autoTest 또는 mlScore)와
+ * 제출 코드·대화·사용량·감독 로그만 보낸다.
+ */
+export interface ChallengeSubmitRequest {
+  /** 학생이 변경한 파일(경로→내용). */
+  submittedFiles: ProjectFiles;
+  /** WebContainer 자동 테스트 결과(참고 신호). ML 챌린지는 빈 결과. */
+  autoTest: AutoTestResult;
+  /** ML 챌린지 성능 점수(객관) — 컨테이너가 숨긴 test셋으로 계산한 지표값 + 임계값. */
+  mlScore?: { metric: MlMetric; value: number; passThreshold: number };
+  /** 선택: 템플릿 대비 변경 diff. */
+  diff?: string;
+  /** 제출 시점까지의 AI 대화(프롬프트+응답 스냅샷). */
+  prompts?: SubmissionPromptTurn[];
+  /** 제출 시점 AI 사용량. */
+  aiUsage?: { questionsUsed: number; tokensUsed: number };
+  /** 시험 감독 로그. */
+  integrityLog?: IntegrityLog;
 }
 
 /**

@@ -829,13 +829,19 @@ export function useWorkspace(
       appendLog('[despy] 프로젝트 파일 mount 중…\n');
       await mountProjectFiles(initialFiles);
 
-      if (!isReentry) {
-        setPhase('installing');
-        appendLog('[despy] npm install 실행 중… (최초 1회는 수십 초 걸릴 수 있습니다)\n');
-        const installExitCode = await runCommand('npm', ['install'], appendLog);
-        if (installExitCode !== 0) {
-          throw new Error(`npm install 실패 (exit ${installExitCode}).`);
-        }
+      // 재진입 여부와 무관하게 npm install을 실행한다. 다른 워크스페이스에서 이동해 온
+      // 경우 이전 node_modules에 현재 과제의 의존성(예: @tensorflow/tfjs)이 없을 수 있으므로,
+      // 매번 실행해 의존성을 보장한다. npm은 이미 설치된 패키지를 스킵하므로 재진입 시에도
+      // 빠르게 완료된다.
+      setPhase('installing');
+      appendLog(
+        isReentry
+          ? '[despy] 의존성 확인 중… (이미 설치된 패키지는 스킵됩니다)\n'
+          : '[despy] npm install 실행 중… (최초 1회는 수십 초 걸릴 수 있습니다)\n',
+      );
+      const installExitCode = await runCommand('npm', ['install'], appendLog);
+      if (installExitCode !== 0) {
+        throw new Error(`npm install 실패 (exit ${installExitCode}).`);
       }
 
       // ML 챌린지는 dev 서버(미리보기)가 없다 — install 후 바로 준비 완료로 두고,

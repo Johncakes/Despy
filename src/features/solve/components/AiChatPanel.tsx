@@ -30,8 +30,11 @@ import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import type { AiPolicy, AgentUsageMetadata } from '@/shared/core/types';
-import type { SubmissionPromptTurn } from '@/shared/core/stores/submissionStore';
+import type {
+  AiPolicy,
+  AgentUsageMetadata,
+  SubmissionPromptTurn,
+} from '@/shared/core/types';
 import {
   parseSearchReplaceEdits,
   type FileEdit,
