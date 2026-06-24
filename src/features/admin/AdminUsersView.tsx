@@ -9,7 +9,8 @@
  */
 'use client';
 
-import styled from 'styled-components';
+import { useState, useMemo } from 'react';
+import styled, { css } from 'styled-components';
 import {
   useCurrentUser,
   useUsers,
@@ -40,6 +41,32 @@ export function AdminUsersView() {
     updateRole.mutate({ userId, role });
   };
 
+  const [sortKey, setSortKey] = useState<'name' | 'email' | 'role'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (key: 'name' | 'email' | 'role') => {
+    if (sortKey === key) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedUsers = useMemo(() => {
+    if (!users) return [];
+    return [...users].sort((a, b) => {
+      let aVal = a[sortKey];
+      let bVal = b[sortKey];
+      
+      // Role ordering logic (admin > professor > student) can be handled alphabetically or custom.
+      // We will do simple string comparison for alphabetical sorting.
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [users, sortKey, sortDir]);
+
   return (
     <Main>
       <Panel title="사용자 관리 (역할 승격)">
@@ -53,13 +80,19 @@ export function AdminUsersView() {
           <Table>
             <thead>
               <tr>
-                <Th>이름</Th>
-                <Th>이메일</Th>
-                <Th>역할</Th>
+                <Th onClick={() => handleSort('name')} $sortable>
+                  이름 {sortKey === 'name' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </Th>
+                <Th onClick={() => handleSort('email')} $sortable>
+                  이메일 {sortKey === 'email' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </Th>
+                <Th onClick={() => handleSort('role')} $sortable>
+                  역할 {sortKey === 'role' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => {
+              {sortedUsers.map((user) => {
                 const isSelf = user.id === currentUser?.id;
                 return (
                   <tr key={user.id}>
@@ -98,9 +131,16 @@ export function AdminUsersView() {
 // ── Styled Components ─────────────────────────────────────────────────────
 
 const Main = styled.main`
-  max-width: 720px;
+  max-width: 1000px;
+  width: 60%;
+  min-width: 600px;
   margin: 0 auto;
   padding: ${({ theme }) => theme.spacing.xl};
+  background: ${({ theme }) => theme.colors.surface};
+  min-height: 100vh;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  border-left: 1px solid ${({ theme }) => theme.colors.border};
+  border-right: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const Table = styled.table`
@@ -108,12 +148,23 @@ const Table = styled.table`
   border-collapse: collapse;
 `;
 
-const Th = styled.th`
+const Th = styled.th<{ $sortable?: boolean }>`
   text-align: left;
   padding: ${({ theme }) => theme.spacing.sm};
   font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.textMuted};
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  
+  ${({ $sortable, theme }) =>
+    $sortable &&
+    css`
+      cursor: pointer;
+      user-select: none;
+      &:hover {
+        color: ${theme.colors.text};
+        background: ${theme.colors.surfaceAlt};
+      }
+    `}
 `;
 
 const Td = styled.td`
@@ -135,3 +186,5 @@ const Empty = styled.p`
   font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.textMuted};
 `;
+
+

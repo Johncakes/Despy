@@ -339,6 +339,10 @@ const Main = styled.main`
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.xl};
   min-height: 100vh;
+  background: ${({ theme }) => theme.colors.surface};
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  border-left: 1px solid ${({ theme }) => theme.colors.border};
+  border-right: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const PageHeader = styled.header`
