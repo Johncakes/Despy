@@ -316,6 +316,9 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               onEditActiveFile={(contents) =>
                 workspace.writeFile(workspace.activePath, contents)
               }
+              onCreateFile={workspace.createFile}
+              onDeletePath={workspace.deletePath}
+              onRenamePath={workspace.renamePath}
               isAiWriting={isAiWriting}
             />
           </EditorArea>
@@ -330,6 +333,8 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               isRunningTests={workspace.isRunningTests}
               testErrorMessage={workspace.testErrorMessage}
               onRunTests={() => void workspace.runTests()}
+              apiConsole={workspace.apiConsole}
+              onSendApiRequest={workspace.sendApiRequest}
             />
           </PreviewArea>
         </WorkspaceColumn>

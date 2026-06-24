@@ -126,6 +126,51 @@ export interface AutoTestResult {
 }
 
 /**
+ * API 요청 콘솔이 보내는 단일 요청(백엔드가 있는 워크스페이스 전용).
+ *
+ * 호스트에서 WebContainer 미리보기로 직접 fetch하면 CORS/COEP에 막히므로, 이 요청은
+ * 컨테이너 *안에서* 실행해 같은 컨테이너 localhost의 백엔드로 보낸다(useWorkspace.sendApiRequest).
+ */
+export interface ApiConsoleRequest {
+  /** HTTP 메서드(GET·POST·PUT·PATCH·DELETE). */
+  method: string;
+  /** 요청 경로(쿼리 포함 가능, 예: '/api/todos'). */
+  path: string;
+  /** 요청 바디(JSON 문자열). GET 등 바디 없는 요청은 비운다. */
+  body?: string;
+}
+
+/** API 요청 콘솔 응답 — 컨테이너 안에서 실행한 HTTP 결과. */
+export interface ApiConsoleResponse {
+  /** 요청이 응답까지 도달했는지(false면 error에 사유). 상태코드와 무관. */
+  ok: boolean;
+  status?: number;
+  statusText?: string;
+  /** 요청 시작~응답 종료까지 경과(ms). */
+  durationMs: number;
+  headers?: Record<string, string>;
+  /** 응답 바디(원문 문자열). */
+  body?: string;
+  /** 네트워크/실행 오류 메시지(요청 자체가 실패한 경우). */
+  error?: string;
+}
+
+/**
+ * API 요청 콘솔 설정 — 백엔드가 있는 워크스페이스에만 주어진다(없으면 null).
+ *
+ * useWorkspace가 템플릿에서 추론해 노출하고, WorkspacePanel이 콘솔 탭 표시 여부와
+ * 초기 입력값·기본 탭을 정하는 데 쓴다.
+ */
+export interface ApiConsoleConfig {
+  /** 백엔드가 listen하는 컨테이너 내부 포트(예: 3000). */
+  port: number;
+  /** 경로 입력의 초기값(템플릿별 best-effort, 예: '/api/todos'·'/todos'). */
+  defaultPath: string;
+  /** 미리보기(프론트)가 없어 콘솔이 주 화면인지(백엔드 단독 → true). */
+  isPrimaryView: boolean;
+}
+
+/**
  * AI 루브릭 채점(Gemini, 구조화 출력) 결과.
  */
 export interface RubricGradingResult {

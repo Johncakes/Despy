@@ -87,6 +87,9 @@ export function WorkspacePlaygroundView() {
             onEditActiveFile={(contents) =>
               workspace.writeFile(workspace.activePath, contents)
             }
+            onCreateFile={workspace.createFile}
+            onDeletePath={workspace.deletePath}
+            onRenamePath={workspace.renamePath}
           />
         </EditorColumn>
 
@@ -101,6 +104,8 @@ export function WorkspacePlaygroundView() {
             isRunningTests={workspace.isRunningTests}
             testErrorMessage={workspace.testErrorMessage}
             onRunTests={() => void workspace.runTests()}
+            apiConsole={workspace.apiConsole}
+            onSendApiRequest={workspace.sendApiRequest}
           />
         </PreviewColumn>
       </Body>

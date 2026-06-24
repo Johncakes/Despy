@@ -12,10 +12,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import styled, { css } from 'styled-components';
-import type { AutoTestResult } from '@/shared/core/types';
+import type {
+  ApiConsoleConfig,
+  ApiConsoleRequest,
+  ApiConsoleResponse,
+  AutoTestResult,
+} from '@/shared/core/types';
 import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
+import { ApiConsole } from '@/features/solve/components/ApiConsole';
 import type { WorkspacePhase } from '@/features/solve/useWorkspace';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -69,7 +75,7 @@ function getProgressPercent(phase: WorkspacePhase): number {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-type WorkspaceTab = 'preview' | 'console' | 'test';
+type WorkspaceTab = 'preview' | 'api' | 'console' | 'test';
 
 interface WorkspacePanelProps {
   phase: WorkspacePhase;
@@ -87,6 +93,12 @@ interface WorkspacePanelProps {
   testErrorMessage: string | null;
   /** '테스트 실행' 요청 콜백 */
   onRunTests: () => void;
+
+  // ── 백엔드 API 요청 콘솔 ──
+  /** API 콘솔 설정(백엔드가 있는 워크스페이스에만). null이면 콘솔 탭을 숨긴다. */
+  apiConsole?: ApiConsoleConfig | null;
+  /** API 요청 전송 콜백(컨테이너 안에서 실행). apiConsole이 있을 때만 사용한다. */
+  onSendApiRequest?: (request: ApiConsoleRequest) => Promise<ApiConsoleResponse>;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -101,8 +113,13 @@ export function WorkspacePanel({
   isRunningTests,
   testErrorMessage,
   onRunTests,
+  apiConsole,
+  onSendApiRequest,
 }: WorkspacePanelProps) {
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>('preview');
+  // 백엔드 단독(프론트 미리보기 없음)이면 콘솔을 주 탭으로 연다(미리보기는 raw JSON뿐).
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(
+    apiConsole?.isPrimaryView ? 'api' : 'preview',
+  );
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   // 새 로그가 들어오면 콘솔을 맨 아래로 스크롤한다.
@@ -127,6 +144,11 @@ export function WorkspacePanel({
           <Tab $active={activeTab === 'preview'} onClick={() => setActiveTab('preview')}>
             미리보기
           </Tab>
+          {apiConsole && onSendApiRequest && (
+            <Tab $active={activeTab === 'api'} onClick={() => setActiveTab('api')}>
+              API 콘솔
+            </Tab>
+          )}
           <Tab $active={activeTab === 'console'} onClick={() => setActiveTab('console')}>
             콘솔
           </Tab>
@@ -185,6 +207,14 @@ export function WorkspacePanel({
               )}
             </StatusOverlay>
           ))}
+
+        {activeTab === 'api' && apiConsole && onSendApiRequest && (
+          <ApiConsole
+            config={apiConsole}
+            isReady={phase === 'ready'}
+            onSend={onSendApiRequest}
+          />
+        )}
 
         {activeTab === 'console' && (
           <Console>

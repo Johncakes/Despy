@@ -21,7 +21,11 @@ import type {
   WebContainer,
   WebContainerProcess,
 } from '@webcontainer/api';
-import type { ProjectFiles } from '@/shared/core/types';
+import type {
+  ApiConsoleRequest,
+  ApiConsoleResponse,
+  ProjectFiles,
+} from '@/shared/core/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -51,6 +55,62 @@ let containerInstance: WebContainer | null = null;
 let bootPromise: Promise<WebContainer> | null = null;
 /** 현재 구동 중인 dev 서버 프로세스(teardown 시 종료용). */
 let devProcess: WebContainerProcess | null = null;
+
+// ── API 요청 콘솔 헬퍼 ────────────────────────────────────────────────────────
+
+/** 컨테이너 안에 쓰는 요청 실행 스크립트 경로(학생 파일트리 밖 — 화면에 안 보임). */
+const REQUEST_HELPER_PATH = '.despy-request.mjs';
+/** 헬퍼 stdout에서 결과 JSON을 감싸는 센티넬(npm/node 잡음과 분리). */
+const RESP_PREFIX = '__DESPY_RESP__';
+const RESP_SUFFIX = '__DESPY_END__';
+
+/**
+ * 컨테이너 안에서 실행되는 요청 스크립트 소스.
+ *
+ * 호스트(despy)에서 미리보기 URL로 직접 fetch하면 cross-origin + COEP/CORS에 막히므로,
+ * 같은 컨테이너의 node로 localhost 백엔드에 요청을 보낸다. 메서드/경로/바디/포트는 env로
+ * 받고(인자 따옴표 이슈 회피), 결과를 센티넬로 감싼 JSON 한 줄로 stdout에 출력한다.
+ */
+const REQUEST_HELPER_SOURCE = `import http from 'node:http';
+
+const method = process.env.DESPY_METHOD || 'GET';
+const path = process.env.DESPY_PATH || '/';
+const body = process.env.DESPY_BODY || '';
+const port = Number(process.env.DESPY_PORT || '3000');
+const started = Date.now();
+
+function emit(result) {
+  process.stdout.write('${RESP_PREFIX}' + JSON.stringify(result) + '${RESP_SUFFIX}');
+}
+
+const headers = {};
+if (body) headers['content-type'] = 'application/json';
+
+const req = http.request({ host: 'localhost', port, path, method, headers }, (res) => {
+  let data = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => (data += chunk));
+  res.on('end', () => {
+    const headers = {};
+    for (const [key, value] of Object.entries(res.headers)) {
+      headers[key] = Array.isArray(value) ? value.join(', ') : String(value);
+    }
+    emit({
+      ok: true,
+      status: res.statusCode,
+      statusText: res.statusMessage,
+      durationMs: Date.now() - started,
+      headers,
+      body: data,
+    });
+  });
+});
+req.on('error', (err) =>
+  emit({ ok: false, durationMs: Date.now() - started, error: String(err && err.message ? err.message : err) }),
+);
+if (body) req.write(body);
+req.end();
+`;
 
 // ── 공개 API ─────────────────────────────────────────────────────────────────
 
@@ -188,6 +248,70 @@ export async function startDevServer(
 /** WebContainer가 이미 부팅된 상태인지 반환한다(재진입 감지용). */
 export function isContainerBooted(): boolean {
   return containerInstance !== null;
+}
+
+/**
+ * 컨테이너 안에서 백엔드(localhost:port)로 HTTP 요청을 한 번 보내고 결과를 반환한다.
+ *
+ * 호스트에서 미리보기 URL로 직접 fetch하면 cross-origin + COEP/CORS에 막히므로, 요청을
+ * 컨테이너 *안에서* node로 실행한다(REQUEST_HELPER_SOURCE). 헬퍼를 FS에 쓴 뒤 env로
+ * 메서드/경로/바디/포트를 넘겨 spawn하고, stdout의 센티넬 사이 JSON을 파싱한다.
+ *
+ * 매 호출마다 헬퍼를 쓰는 비용은 작고, mount로 덮였을 가능성에도 안전하다. 수동 'Send'
+ * 버튼용이라 요청당 node 프로세스 1회 spawn(수백 ms)도 충분하다.
+ *
+ * 실행/파싱 실패는 throw하지 않고 ok:false 응답으로 돌려준다(콘솔에서 사유를 보여주려고).
+ */
+export async function sendHttpRequest(
+  request: ApiConsoleRequest & { port: number },
+): Promise<ApiConsoleResponse> {
+  const started = Date.now();
+  try {
+    const container = await bootWebContainer();
+    await container.fs.writeFile(REQUEST_HELPER_PATH, REQUEST_HELPER_SOURCE);
+
+    const process = await container.spawn('node', [REQUEST_HELPER_PATH], {
+      env: {
+        DESPY_METHOD: request.method,
+        DESPY_PATH: request.path,
+        DESPY_BODY: request.body ?? '',
+        DESPY_PORT: String(request.port),
+      },
+    });
+
+    let buffer = '';
+    process.output
+      .pipeTo(
+        new WritableStream<string>({
+          write(chunk) {
+            buffer += chunk;
+          },
+        }),
+      )
+      .catch(() => {
+        /* 프로세스 종료에 따른 스트림 취소는 정상 흐름이므로 무시 */
+      });
+
+    const exitCode = await process.exit;
+
+    const start = buffer.indexOf(RESP_PREFIX);
+    const end = buffer.indexOf(RESP_SUFFIX);
+    if (start === -1 || end === -1 || end < start) {
+      return {
+        ok: false,
+        durationMs: Date.now() - started,
+        error: `응답을 파싱하지 못했습니다 (exit ${exitCode}). 서버가 실행 중인지 확인하세요.`,
+      };
+    }
+    const json = buffer.slice(start + RESP_PREFIX.length, end);
+    return JSON.parse(json) as ApiConsoleResponse;
+  } catch (error) {
+    return {
+      ok: false,
+      durationMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /**

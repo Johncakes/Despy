@@ -20,7 +20,13 @@
  * 사용처: features/solve/ChallengeSolveView(과제 풀이·영속), WorkspacePlaygroundView(PoC·in-memory)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AutoTestResult, ProjectFiles } from '@/shared/core/types';
+import type {
+  ApiConsoleConfig,
+  ApiConsoleRequest,
+  ApiConsoleResponse,
+  AutoTestResult,
+  ProjectFiles,
+} from '@/shared/core/types';
 import {
   getWorkspaceSession,
   useWorkspaceStore,
@@ -31,6 +37,7 @@ import {
   killDevServer,
   mountProjectFiles,
   runCommand,
+  sendHttpRequest,
   startDevServer,
 } from '@/shared/lib/webcontainer/runtime';
 import {
@@ -102,6 +109,18 @@ export interface UseWorkspaceResult {
   /** 테스트 실행 실패 메시지(타임아웃·결과 파일 부재 등, 정상 실행이면 null) */
   testErrorMessage: string | null;
 
+  // ── 백엔드 API 요청 콘솔 ──
+  /**
+   * API 요청 콘솔 설정(백엔드가 있는 템플릿에만). 없으면 null(순수 프론트 — 콘솔 숨김).
+   * 템플릿에서 추론한다(Express 단독·풀스택 → 포트 3000).
+   */
+  apiConsole: ApiConsoleConfig | null;
+  /**
+   * 컨테이너 안에서 백엔드로 HTTP 요청을 한 번 보내고 결과를 반환한다(콘솔 'Send'용).
+   * 백엔드가 없는 템플릿이면 ok:false 응답을 돌려준다.
+   */
+  sendApiRequest: (request: ApiConsoleRequest) => Promise<ApiConsoleResponse>;
+
   // ── AI 사용량 (영속, P4) ──
   /** 지금까지 보낸 AI 질문 횟수(challengeId 없으면 0) */
   questionsUsed: number;
@@ -133,6 +152,28 @@ const WORKSPACE_PERSIST_DEBOUNCE_MS = 400;
 function inferPreviewPort(template: ProjectFiles): number | undefined {
   const isFullstack = 'vite.config.js' in template && 'server/index.js' in template;
   return isFullstack ? FULLSTACK_PREVIEW_PORT : undefined;
+}
+
+/** 백엔드 API가 listen하는 컨테이너 내부 포트(템플릿 server.js·index.js의 PORT 기본값). */
+const BACKEND_API_PORT = 3000;
+
+/**
+ * 백엔드가 있는 템플릿에서 API 요청 콘솔 설정을 추론한다(없으면 null — 순수 프론트).
+ *
+ * 백엔드 식별: Express 진입점(server/index.js[풀스택]·src/server.js[백 단독])이 있으면
+ * 백엔드가 있다고 본다. 프론트(index.html) 유무로 콘솔이 주 화면인지(백 단독)와 경로
+ * 초기값(/api/todos[풀스택]·/todos[백 단독])을 정한다. 모두 best-effort이며 사용자가 수정한다.
+ * persist 스키마 변경을 피하려고 템플릿 내용으로만 추론한다(inferPreviewPort와 동일 원칙).
+ */
+function inferApiConsoleConfig(template: ProjectFiles): ApiConsoleConfig | null {
+  const hasBackend = 'server/index.js' in template || 'src/server.js' in template;
+  if (!hasBackend) return null;
+  const hasFrontend = 'index.html' in template;
+  return {
+    port: BACKEND_API_PORT,
+    defaultPath: hasFrontend ? '/api/todos' : '/todos',
+    isPrimaryView: !hasFrontend,
+  };
 }
 
 /** 초기 활성 파일: src/App.jsx 우선, 없으면 첫 편집 가능 파일, 그것도 없으면 첫 파일 */
@@ -211,6 +252,24 @@ export function useWorkspace(
 
   const lockedSet = useMemo(() => new Set(lockedPaths), [lockedPaths]);
   const isPathLocked = useCallback((path: string) => lockedSet.has(path), [lockedSet]);
+
+  // 백엔드 API 요청 콘솔 설정 — 템플릿에서 추론(백엔드 없으면 null). 템플릿은 안정적이라 1회 계산.
+  const apiConsole = useMemo(() => inferApiConsoleConfig(template), [template]);
+
+  // 컨테이너 안에서 백엔드로 요청을 보낸다(콘솔 'Send'). 백엔드 없으면 ok:false로 안내.
+  const sendApiRequest = useCallback(
+    async (request: ApiConsoleRequest): Promise<ApiConsoleResponse> => {
+      if (!apiConsole) {
+        return {
+          ok: false,
+          durationMs: 0,
+          error: '이 워크스페이스에는 백엔드 API가 없습니다.',
+        };
+      }
+      return sendHttpRequest({ ...request, port: apiConsole.port });
+    },
+    [apiConsole],
+  );
 
   const appendLog = useCallback((chunk: string) => {
     setLogs((prev) => [...prev, chunk]);
@@ -502,6 +561,8 @@ export function useWorkspace(
     testResult,
     isRunningTests,
     testErrorMessage,
+    apiConsole,
+    sendApiRequest,
     questionsUsed,
     tokensUsed,
     recordAiTurn,

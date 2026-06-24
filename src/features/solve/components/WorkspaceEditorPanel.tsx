@@ -48,6 +48,12 @@ interface WorkspaceEditorPanelProps {
   onSelectFile: (path: string) => void;
   /** 활성 파일 내용 변경 (상위가 버퍼+FS 동기화) */
   onEditActiveFile: (contents: string) => void;
+  /** 빈 새 파일 생성 (전체 경로) */
+  onCreateFile: (path: string) => void;
+  /** 파일/폴더(경로 프리픽스) 삭제 */
+  onDeletePath: (path: string) => void;
+  /** 파일/폴더 경로 변경(이동) */
+  onRenamePath: (fromPath: string, toPath: string) => void;
   /** AI가 코드를 실시간 작성하는 중이면 에디터를 read-only로 잠가 충돌을 막는다 */
   isAiWriting?: boolean;
   /** 헤더 우측 액션(예: AI 미러링 데모 버튼) */
@@ -69,6 +75,9 @@ export function WorkspaceEditorPanel({
   lockedPaths,
   onSelectFile,
   onEditActiveFile,
+  onCreateFile,
+  onDeletePath,
+  onRenamePath,
   isAiWriting = false,
   actions,
 }: WorkspaceEditorPanelProps) {
@@ -94,6 +103,9 @@ export function WorkspaceEditorPanel({
             activePath={activePath}
             lockedPaths={lockedPaths}
             onSelectFile={onSelectFile}
+            onCreateFile={onCreateFile}
+            onDeletePath={onDeletePath}
+            onRenamePath={onRenamePath}
           />
         </Sidebar>
         <EditorHost>
@@ -134,7 +146,7 @@ const Layout = styled.div`
 `;
 
 const Sidebar = styled.div`
-  width: 180px;
+  width: 220px;
   flex-shrink: 0;
   min-height: 0;
   border-right: 1px solid ${({ theme }) => theme.colors.border};

@@ -1,9 +1,11 @@
 /**
  * GradingDashboardView.tsx — 교수 채점 대시보드
  *
- * 특정 과제의 채점 현황을 보여주는 교수용 화면. 채점 기준(루브릭·AI정책) 요약과 함께,
- * 학생이 풀이 화면에서 제출해 저장된 채점 결과 목록(submissionStore)을 점수·시각·제출자
- * 이름과 함께 최신순으로 보여주고, 각 제출을 펼쳐 루브릭 항목별 점수·피드백을 확인한다.
+ * 특정 과제의 채점 현황을 보여주는 교수용 화면. 상단에 집계(평균·중앙값·최고·테스트·
+ * 질문 + 점수 분포 히스토그램)를 크게 띄우고, 그 아래에 제출을 **한 줄씩 비교 가능한
+ * 컴팩트한 표**로 보여준다. 한 행을 클릭하면 **큰 중앙 모달**이 열려 탭(루브릭·풀이
+ * 타임라인·제출 코드)으로 그 학생의 상세를 넓은 폭에서 확인한다. 채점 기준(점수 모델·
+ * 루브릭·AI정책)도 헤더 버튼으로 띄우는 모달로 분리해 목록 화면을 비교에 집중시킨다.
  *
  * ⚠️ MVP 한계: 인증·교수/학생 분리·서버 집계는 범위 밖이라, 이 목록은 **이 브라우저에서
  *    이뤄진 제출들**이며 제출자 식별은 입력한 이름/별명에 의존한다(submissionStore 참조).
@@ -28,7 +30,8 @@ import {
   type DiffLineType,
   type FileDiff,
 } from '@/shared/lib/utils/lineDiff';
-import { Panel } from '@/shared/components/ui/Panel';
+import { Button } from '@/shared/components/ui/Button';
+import { Modal } from '@/shared/components/ui/Modal';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +47,9 @@ interface TimelineStep {
   /** 이 프롬프트 작성 시점 → 다음 프롬프트(또는 최종) 사이의 파일별 변경 diff. */
   diffs: FileDiff[];
 }
+
+/** 제출 상세 모달의 탭. */
+type DetailTab = 'rubric' | 'timeline' | 'code';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -95,7 +101,7 @@ function fileDiffTag(fileDiff: FileDiff): string {
 function diffSign(type: DiffLineType): string {
   if (type === 'add') return '+';
   if (type === 'del') return '−';
-  return ' ';
+  return ' ';
 }
 
 // ── 집계(통계) ──────────────────────────────────────────────────────────────
@@ -217,9 +223,13 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
   );
   const submissions = storedSubmissions ?? [];
 
-  // 정렬·이름 필터(집계 뷰 상호작용).
+  // 정렬·이름 필터(목록 상호작용).
   const [sortBy, setSortBy] = useState<SortKey>('recent');
   const [nameQuery, setNameQuery] = useState('');
+  // 모달 상태 — 채점 기준 모달 / 선택된 제출 상세 모달(+ 활성 탭).
+  const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>('rubric');
 
   const stats = computeStats(submissions);
   const histogram = scoreHistogram(submissions);
@@ -232,262 +242,389 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
     sortBy,
   );
 
-  // 루브릭 항목 id → 설명(제출 상세에서 점수 옆에 표시).
+  // 루브릭 항목 id → 설명(상세에서 점수 옆에 표시).
   const criterionLabel = (criterionId: string): string =>
     rubric.criteria.find((criterion) => criterion.id === criterionId)?.description ??
     criterionId;
 
+  const selectedSubmission =
+    selectedSubmissionId !== null
+      ? submissions.find((submission) => submission.id === selectedSubmissionId) ?? null
+      : null;
+
+  const openSubmission = (submissionId: string) => {
+    setSelectedSubmissionId(submissionId);
+    setDetailTab('rubric');
+  };
+
   return (
     <Layout>
       <Header>
-        <BackLink href="/author/challenge">← 과제 출제로 돌아가기</BackLink>
+        <HeaderTop>
+          <BackLink href="/author/challenge">← 과제 출제로 돌아가기</BackLink>
+          <Button variant="ghost" onClick={() => setIsCriteriaOpen(true)}>
+            채점 기준 보기
+          </Button>
+        </HeaderTop>
         <Title>채점 대시보드 — {challenge.title || '(제목 없음)'}</Title>
-        <Subtitle>
-          이 과제의 학생 제출·점수를 모아 보는 화면입니다. 점수가 어떻게 계산되는지는 아래
-          &lsquo;채점 기준&rsquo;을 참고하세요.
-        </Subtitle>
+        <FormulaInline>
+          최종 = 자동 테스트 × {formatWeight(rubric.weights.tests)} + 루브릭 ×{' '}
+          {formatWeight(rubric.weights.rubric)} · AI {aiPolicy.model} · 질문{' '}
+          {aiPolicy.maxQuestions}회 · 토큰 {aiPolicy.maxTokens.toLocaleString()}
+        </FormulaInline>
       </Header>
 
-      <Grid>
-        <Panel title="채점 기준">
-          <ScoreModel>
-            <ScoreModelHead>최종 점수는 0~100점 — 두 축을 가중 합산합니다</ScoreModelHead>
-            <Formula>
-              최종 = 자동 테스트 통과율 × {formatWeight(rubric.weights.tests)} + 루브릭 득점률 ×{' '}
-              {formatWeight(rubric.weights.rubric)}
-            </Formula>
-            <ModelList>
-              <ModelItem>
-                <strong>자동 테스트 {formatWeight(rubric.weights.tests)}</strong> — 채점용 테스트를
-                돌려 나온 통과 비율(통과 수 ÷ 전체 수)을 점수로 환산.
-              </ModelItem>
-              <ModelItem>
-                <strong>AI 루브릭 {formatWeight(rubric.weights.rubric)}</strong> — 아래 항목들을 AI가
-                정성 평가한 점수의 합 ÷ 만점({maxScoreSum}점)을 점수로 환산.
-              </ModelItem>
-            </ModelList>
-          </ScoreModel>
+      {submissions.length === 0 ? (
+        <PlaceholderBox>
+          <PlaceholderTitle>아직 제출이 없습니다</PlaceholderTitle>
+          <PlaceholderBody>
+            학생이 풀이 화면에서 <strong>제출</strong>하면 채점 결과가 이 화면에
+            점수·제출자 이름과 함께 쌓입니다. (인증이 없는 MVP라 이 브라우저에서 이뤄진
+            제출만 표시됩니다.)
+          </PlaceholderBody>
+        </PlaceholderBox>
+      ) : (
+        <>
+          <StatBand>
+            <StatGroup>
+              <Stat>
+                <StatNum>{stats.avg}</StatNum>
+                <StatLabel>평균</StatLabel>
+              </Stat>
+              <Stat>
+                <StatNum>{stats.median}</StatNum>
+                <StatLabel>중앙값</StatLabel>
+              </Stat>
+              <Stat>
+                <StatNum>{stats.max}</StatNum>
+                <StatLabel>최고</StatLabel>
+              </Stat>
+              <Stat>
+                <StatNum>{stats.avgTestRate}%</StatNum>
+                <StatLabel>테스트 평균</StatLabel>
+              </Stat>
+              <Stat>
+                <StatNum>{stats.medianQuestions}</StatNum>
+                <StatLabel>질문 중앙값</StatLabel>
+              </Stat>
+            </StatGroup>
+            <Histogram>
+              {histogram.map((bucket) => (
+                <HistoBar key={bucket.label} title={`${bucket.label}: ${bucket.count}명`}>
+                  <HistoFill
+                    style={{ height: `${(bucket.count / maxBucketCount) * 100}%` }}
+                    $empty={bucket.count === 0}
+                  />
+                  <HistoCount>{bucket.count}</HistoCount>
+                  <HistoLabel>{bucket.label}</HistoLabel>
+                </HistoBar>
+              ))}
+            </Histogram>
+          </StatBand>
 
-          <CriterionHeader>
-            AI 루브릭 항목
-            <CriterionHeaderHint>
-              합 {maxScoreSum}점 만점 · 득점률이 {formatWeight(rubric.weights.rubric)}로 환산
-              {stats.count > 0 && ` · 제출 ${stats.count}건 평균`}
-            </CriterionHeaderHint>
-          </CriterionHeader>
-          <CriterionList>
-            {rubric.criteria.map((criterion, index) => (
-              <CriterionRow key={criterion.id}>
-                <CriterionDesc>
-                  #{index + 1} {criterion.description || '(설명 없음)'}
-                </CriterionDesc>
-                <CriterionScore>
-                  {stats.count > 0 && (
-                    <CriterionAvg>평균 {criterionAverage(submissions, criterion.id)}</CriterionAvg>
-                  )}
-                  만점 {criterion.maxScore}점
-                </CriterionScore>
-              </CriterionRow>
-            ))}
-            {rubric.criteria.length === 0 && (
-              <Empty>등록된 루브릭 항목이 없습니다.</Empty>
-            )}
-          </CriterionList>
-          <AiMeta>
-            AI 정책 — 모델 {aiPolicy.model} · 질문 {aiPolicy.maxQuestions}회 · 토큰{' '}
-            {aiPolicy.maxTokens.toLocaleString()}
-          </AiMeta>
-        </Panel>
+          <Controls>
+            <SortSelect
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as SortKey)}
+              aria-label="정렬 기준"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label}
+                </option>
+              ))}
+            </SortSelect>
+            <SearchInput
+              value={nameQuery}
+              onChange={(event) => setNameQuery(event.target.value)}
+              placeholder="이름 검색"
+              aria-label="제출자 이름 검색"
+            />
+            <ResultCount>
+              제출 {submissions.length}건
+              {query && ` · 표시 ${displayedSubmissions.length}건`}
+            </ResultCount>
+          </Controls>
 
-        <Panel title={`학생 제출 (${submissions.length})`}>
-          {submissions.length === 0 ? (
-            <PlaceholderBox>
-              <PlaceholderTitle>아직 제출이 없습니다</PlaceholderTitle>
-              <PlaceholderBody>
-                학생이 풀이 화면에서 <strong>제출</strong>하면 채점 결과가 이 목록에
-                점수·제출자 이름과 함께 쌓입니다. (인증이 없는 MVP라 이 브라우저에서 이뤄진
-                제출만 표시됩니다.)
-              </PlaceholderBody>
-            </PlaceholderBox>
+          {displayedSubmissions.length === 0 ? (
+            <MutedNote>검색 결과가 없습니다.</MutedNote>
           ) : (
-            <>
-              <StatBand>
-                <StatGroup>
-                  <Stat>
-                    <StatNum>{stats.avg}</StatNum>
-                    <StatLabel>평균</StatLabel>
-                  </Stat>
-                  <Stat>
-                    <StatNum>{stats.median}</StatNum>
-                    <StatLabel>중앙값</StatLabel>
-                  </Stat>
-                  <Stat>
-                    <StatNum>{stats.max}</StatNum>
-                    <StatLabel>최고</StatLabel>
-                  </Stat>
-                  <Stat>
-                    <StatNum>{stats.avgTestRate}%</StatNum>
-                    <StatLabel>테스트 평균</StatLabel>
-                  </Stat>
-                  <Stat>
-                    <StatNum>{stats.medianQuestions}</StatNum>
-                    <StatLabel>질문 중앙값</StatLabel>
-                  </Stat>
-                </StatGroup>
-                <Histogram>
-                  {histogram.map((bucket) => (
-                    <HistoBar key={bucket.label} title={`${bucket.label}: ${bucket.count}명`}>
-                      <HistoFill
-                        style={{ height: `${(bucket.count / maxBucketCount) * 100}%` }}
-                        $empty={bucket.count === 0}
-                      />
-                      <HistoCount>{bucket.count}</HistoCount>
-                      <HistoLabel>{bucket.label}</HistoLabel>
-                    </HistoBar>
-                  ))}
-                </Histogram>
-              </StatBand>
-
-              <Controls>
-                <SortSelect
-                  value={sortBy}
-                  onChange={(event) => setSortBy(event.target.value as SortKey)}
-                  aria-label="정렬 기준"
-                >
-                  {SORT_OPTIONS.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SortSelect>
-                <SearchInput
-                  value={nameQuery}
-                  onChange={(event) => setNameQuery(event.target.value)}
-                  placeholder="이름 검색"
-                  aria-label="제출자 이름 검색"
-                />
-              </Controls>
-
-              {displayedSubmissions.length === 0 ? (
-                <MutedNote>검색 결과가 없습니다.</MutedNote>
-              ) : (
-                <SubmissionList>
-                  {displayedSubmissions.map((submission) => {
-                const prompts = submission.prompts ?? [];
-                const finalFiles = submission.submittedFiles ?? {};
-                const codeEntries = Object.entries(finalFiles);
-                const timeline = buildTimeline(prompts, finalFiles);
-                return (
-                  <SubmissionItem key={submission.id}>
-                    <SubmissionSummary>
-                      <StudentName>{submission.studentName}</StudentName>
-                      <SubmittedAt>{formatTime(submission.result.submittedAt)}</SubmittedAt>
-                      <TestMeta>
-                        테스트 {submission.result.autoTest.passedCount}/
-                        {submission.result.autoTest.totalCount}
-                      </TestMeta>
-                      {submission.aiUsage && (
-                        <TestMeta>
-                          질문 {submission.aiUsage.questionsUsed} · 토큰{' '}
-                          {submission.aiUsage.tokensUsed.toLocaleString()}
-                        </TestMeta>
-                      )}
+            <SubmissionTable role="table">
+              <TableHeadRow role="row">
+                <HeadCell $col="name">이름</HeadCell>
+                <HeadCell $col="time">제출시각</HeadCell>
+                <HeadCell $col="test">테스트</HeadCell>
+                <HeadCell $col="questions">질문</HeadCell>
+                <HeadCell $col="tokens">토큰</HeadCell>
+                <HeadCell $col="score">점수</HeadCell>
+                <HeadCell $col="chevron" aria-hidden />
+              </TableHeadRow>
+              <TableBody>
+                {displayedSubmissions.map((submission) => (
+                  <TableRow
+                    key={submission.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openSubmission(submission.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openSubmission(submission.id);
+                      }
+                    }}
+                  >
+                    <BodyCell $col="name">{submission.studentName}</BodyCell>
+                    <BodyCell $col="time">
+                      {formatTime(submission.result.submittedAt)}
+                    </BodyCell>
+                    <BodyCell $col="test">
+                      {submission.result.autoTest.passedCount}/
+                      {submission.result.autoTest.totalCount}
+                    </BodyCell>
+                    <BodyCell $col="questions">
+                      {submission.aiUsage ? submission.aiUsage.questionsUsed : '—'}
+                    </BodyCell>
+                    <BodyCell $col="tokens">
+                      {submission.aiUsage
+                        ? submission.aiUsage.tokensUsed.toLocaleString()
+                        : '—'}
+                    </BodyCell>
+                    <BodyCell $col="score">
                       <ScoreBadge $score={Math.round(submission.result.finalScore)}>
                         {Math.round(submission.result.finalScore)}점
                       </ScoreBadge>
-                    </SubmissionSummary>
-
-                    <Detail>
-                      <DetailSummary>루브릭 항목별 점수·피드백</DetailSummary>
-                      <DetailBody>
-                        <CriterionScoreList>
-                          {submission.result.rubric.scores.map((score) => (
-                            <CriterionScoreRow key={score.criterionId}>
-                              <CriterionScoreDesc>
-                                {criterionLabel(score.criterionId)}
-                              </CriterionScoreDesc>
-                              <CriterionScoreValue>{score.score}점</CriterionScoreValue>
-                            </CriterionScoreRow>
-                          ))}
-                        </CriterionScoreList>
-                        {submission.result.rubric.feedback && (
-                          <FeedbackText>{submission.result.rubric.feedback}</FeedbackText>
-                        )}
-                      </DetailBody>
-                    </Detail>
-
-                    <Detail open>
-                      <DetailSummary>풀이 타임라인 — 프롬프트별 코드 변경 ({timeline.length})</DetailSummary>
-                      <DetailBody>
-                        {timeline.length === 0 ? (
-                          <MutedNote>기록된 AI 대화가 없습니다.</MutedNote>
-                        ) : (
-                          <Timeline>
-                            {timeline.map((step, index) => (
-                              <Step key={index}>
-                                <StepHead>
-                                  <StepNo>#{index + 1}</StepNo>
-                                  <StepPrompt>{step.prompt || '(빈 프롬프트)'}</StepPrompt>
-                                  <StepStat>{formatDiffStat(step.diffs)}</StepStat>
-                                </StepHead>
-                                {step.response && (
-                                  <StepResponse>
-                                    <DetailSummary>AI 응답</DetailSummary>
-                                    <ResponseText>{step.response}</ResponseText>
-                                  </StepResponse>
-                                )}
-                                {step.diffs.length === 0 ? (
-                                  <MutedNote>이 프롬프트 구간에는 코드 변경이 없습니다.</MutedNote>
-                                ) : (
-                                  step.diffs.map((fileDiff) => (
-                                    <DiffFile key={fileDiff.path}>
-                                      <DiffFileHead>
-                                        <CodePath>{fileDiff.path}</CodePath>
-                                        <DiffFileTag>{fileDiffTag(fileDiff)}</DiffFileTag>
-                                      </DiffFileHead>
-                                      <DiffPre>
-                                        {fileDiff.lines.map((line, lineIndex) => (
-                                          <DiffLineRow key={lineIndex} $type={line.type}>
-                                            <DiffSign>{diffSign(line.type)}</DiffSign>
-                                            <DiffText>{line.text}</DiffText>
-                                          </DiffLineRow>
-                                        ))}
-                                      </DiffPre>
-                                    </DiffFile>
-                                  ))
-                                )}
-                              </Step>
-                            ))}
-                          </Timeline>
-                        )}
-                      </DetailBody>
-                    </Detail>
-
-                    <Detail>
-                      <DetailSummary>최종 제출 코드 ({codeEntries.length}개 파일)</DetailSummary>
-                      <DetailBody>
-                        {codeEntries.length === 0 ? (
-                          <MutedNote>템플릿 대비 변경된 파일이 없습니다.</MutedNote>
-                        ) : (
-                          codeEntries.map(([path, contents]) => (
-                            <CodeFile key={path}>
-                              <CodePath>{path}</CodePath>
-                              <CodeBlock>{contents}</CodeBlock>
-                            </CodeFile>
-                          ))
-                        )}
-                      </DetailBody>
-                    </Detail>
-                  </SubmissionItem>
-                );
-              })}
-                </SubmissionList>
-              )}
-            </>
+                    </BodyCell>
+                    <BodyCell $col="chevron" aria-hidden>
+                      ▸
+                    </BodyCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </SubmissionTable>
           )}
-        </Panel>
-      </Grid>
+        </>
+      )}
+
+      {/* 채점 기준 모달 — 좌측 절반을 먹던 점수 모델·루브릭·AI정책을 옮겨 담았다. */}
+      <Modal
+        isOpen={isCriteriaOpen}
+        onClose={() => setIsCriteriaOpen(false)}
+        title="채점 기준"
+        size="md"
+      >
+        <ScoreModel>
+          <ScoreModelHead>최종 점수는 0~100점 — 두 축을 가중 합산합니다</ScoreModelHead>
+          <Formula>
+            최종 = 자동 테스트 통과율 × {formatWeight(rubric.weights.tests)} + 루브릭 득점률 ×{' '}
+            {formatWeight(rubric.weights.rubric)}
+          </Formula>
+          <ModelList>
+            <ModelItem>
+              <strong>자동 테스트 {formatWeight(rubric.weights.tests)}</strong> — 채점용 테스트를
+              돌려 나온 통과 비율(통과 수 ÷ 전체 수)을 점수로 환산.
+            </ModelItem>
+            <ModelItem>
+              <strong>AI 루브릭 {formatWeight(rubric.weights.rubric)}</strong> — 아래 항목들을 AI가
+              정성 평가한 점수의 합 ÷ 만점({maxScoreSum}점)을 점수로 환산.
+            </ModelItem>
+          </ModelList>
+        </ScoreModel>
+
+        <CriterionHeader>
+          AI 루브릭 항목
+          <CriterionHeaderHint>
+            합 {maxScoreSum}점 만점 · 득점률이 {formatWeight(rubric.weights.rubric)}로 환산
+            {stats.count > 0 && ` · 제출 ${stats.count}건 평균`}
+          </CriterionHeaderHint>
+        </CriterionHeader>
+        <CriterionList>
+          {rubric.criteria.map((criterion, index) => (
+            <CriterionRow key={criterion.id}>
+              <CriterionDesc>
+                #{index + 1} {criterion.description || '(설명 없음)'}
+              </CriterionDesc>
+              <CriterionScore>
+                {stats.count > 0 && (
+                  <CriterionAvg>평균 {criterionAverage(submissions, criterion.id)}</CriterionAvg>
+                )}
+                만점 {criterion.maxScore}점
+              </CriterionScore>
+            </CriterionRow>
+          ))}
+          {rubric.criteria.length === 0 && (
+            <Empty>등록된 루브릭 항목이 없습니다.</Empty>
+          )}
+        </CriterionList>
+        <AiMeta>
+          AI 정책 — 모델 {aiPolicy.model} · 질문 {aiPolicy.maxQuestions}회 · 토큰{' '}
+          {aiPolicy.maxTokens.toLocaleString()}
+        </AiMeta>
+      </Modal>
+
+      {/* 제출 상세 모달 — 큰 중앙 모달에서 탭으로 루브릭·타임라인·코드를 넓게 본다. */}
+      <Modal
+        isOpen={selectedSubmission !== null}
+        onClose={() => setSelectedSubmissionId(null)}
+        size="full"
+        title={selectedSubmission?.studentName ?? ''}
+        headerExtra={
+          selectedSubmission && (
+            <HeaderMeta>
+              <ScoreBadge $score={Math.round(selectedSubmission.result.finalScore)}>
+                {Math.round(selectedSubmission.result.finalScore)}점
+              </ScoreBadge>
+              <HeaderMetaItem>{formatTime(selectedSubmission.result.submittedAt)}</HeaderMetaItem>
+              <HeaderMetaItem>
+                테스트 {selectedSubmission.result.autoTest.passedCount}/
+                {selectedSubmission.result.autoTest.totalCount}
+              </HeaderMetaItem>
+              {selectedSubmission.aiUsage && (
+                <HeaderMetaItem>
+                  질문 {selectedSubmission.aiUsage.questionsUsed} · 토큰{' '}
+                  {selectedSubmission.aiUsage.tokensUsed.toLocaleString()}
+                </HeaderMetaItem>
+              )}
+            </HeaderMeta>
+          )
+        }
+        isBodyFlush
+      >
+        {selectedSubmission && (
+          <SubmissionDetail
+            submission={selectedSubmission}
+            activeTab={detailTab}
+            onTabChange={setDetailTab}
+            criterionLabel={criterionLabel}
+          />
+        )}
+      </Modal>
     </Layout>
+  );
+}
+
+// ── 제출 상세(모달 본문) ──────────────────────────────────────────────────────
+
+interface SubmissionDetailProps {
+  submission: StoredSubmission;
+  activeTab: DetailTab;
+  onTabChange: (tab: DetailTab) => void;
+  criterionLabel: (criterionId: string) => string;
+}
+
+/** 제출 상세 모달 본문 — 탭(루브릭/타임라인/코드)으로 한 학생의 풀이를 넓게 보여준다. */
+function SubmissionDetail({
+  submission,
+  activeTab,
+  onTabChange,
+  criterionLabel,
+}: SubmissionDetailProps) {
+  const prompts = submission.prompts ?? [];
+  const finalFiles = submission.submittedFiles ?? {};
+  const codeEntries = Object.entries(finalFiles);
+  const timeline = buildTimeline(prompts, finalFiles);
+
+  const tabs: { key: DetailTab; label: string }[] = [
+    { key: 'rubric', label: '루브릭' },
+    { key: 'timeline', label: `풀이 타임라인 (${timeline.length})` },
+    { key: 'code', label: `제출 코드 (${codeEntries.length})` },
+  ];
+
+  return (
+    <DetailLayout>
+      <TabBar role="tablist">
+        {tabs.map((tab) => (
+          <Tab
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.key}
+            $active={activeTab === tab.key}
+            onClick={() => onTabChange(tab.key)}
+          >
+            {tab.label}
+          </Tab>
+        ))}
+      </TabBar>
+
+      <TabPanel>
+        {activeTab === 'rubric' && (
+          <DetailBody>
+            <CriterionScoreList>
+              {submission.result.rubric.scores.map((score) => (
+                <CriterionScoreRow key={score.criterionId}>
+                  <CriterionScoreDesc>{criterionLabel(score.criterionId)}</CriterionScoreDesc>
+                  <CriterionScoreValue>{score.score}점</CriterionScoreValue>
+                </CriterionScoreRow>
+              ))}
+            </CriterionScoreList>
+            {submission.result.rubric.feedback && (
+              <FeedbackText>{submission.result.rubric.feedback}</FeedbackText>
+            )}
+          </DetailBody>
+        )}
+
+        {activeTab === 'timeline' && (
+          <DetailBody>
+            {timeline.length === 0 ? (
+              <MutedNote>기록된 AI 대화가 없습니다.</MutedNote>
+            ) : (
+              <Timeline>
+                {timeline.map((step, index) => (
+                  <Step key={index}>
+                    <StepHead>
+                      <StepNo>#{index + 1}</StepNo>
+                      <StepPrompt>{step.prompt || '(빈 프롬프트)'}</StepPrompt>
+                      <StepStat>{formatDiffStat(step.diffs)}</StepStat>
+                    </StepHead>
+                    {step.response && (
+                      <StepResponse>
+                        <DetailSummary>AI 응답</DetailSummary>
+                        <ResponseText>{step.response}</ResponseText>
+                      </StepResponse>
+                    )}
+                    {step.diffs.length === 0 ? (
+                      <MutedNote>이 프롬프트 구간에는 코드 변경이 없습니다.</MutedNote>
+                    ) : (
+                      step.diffs.map((fileDiff) => (
+                        <DiffFile key={fileDiff.path}>
+                          <DiffFileHead>
+                            <CodePath>{fileDiff.path}</CodePath>
+                            <DiffFileTag>{fileDiffTag(fileDiff)}</DiffFileTag>
+                          </DiffFileHead>
+                          <DiffPre>
+                            {fileDiff.lines.map((line, lineIndex) => (
+                              <DiffLineRow key={lineIndex} $type={line.type}>
+                                <DiffSign>{diffSign(line.type)}</DiffSign>
+                                <DiffText>{line.text}</DiffText>
+                              </DiffLineRow>
+                            ))}
+                          </DiffPre>
+                        </DiffFile>
+                      ))
+                    )}
+                  </Step>
+                ))}
+              </Timeline>
+            )}
+          </DetailBody>
+        )}
+
+        {activeTab === 'code' && (
+          <DetailBody>
+            {codeEntries.length === 0 ? (
+              <MutedNote>템플릿 대비 변경된 파일이 없습니다.</MutedNote>
+            ) : (
+              codeEntries.map(([path, contents]) => (
+                <CodeFile key={path}>
+                  <CodePath>{path}</CodePath>
+                  <CodeBlock>{contents}</CodeBlock>
+                </CodeFile>
+              ))
+            )}
+          </DetailBody>
+        )}
+      </TabPanel>
+    </DetailLayout>
   );
 }
 
@@ -511,7 +648,7 @@ function formatTime(timestamp: number): string {
 const Layout = styled.div`
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.lg};
+  gap: ${({ theme }) => theme.spacing.md};
   height: 100%;
   min-height: 0;
 `;
@@ -520,6 +657,14 @@ const Header = styled.div`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.xs};
+`;
+
+// 헤더 1행 — 좌측 뒤로가기 + 우측 "채점 기준 보기" 모달 트리거.
+const HeaderTop = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.md};
 `;
 
 const BackLink = styled(Link)`
@@ -533,19 +678,316 @@ const Title = styled.h1`
   color: ${({ theme }) => theme.colors.text};
 `;
 
-const Subtitle = styled.p`
+// 점수 공식·AI 정책 한 줄 요약 — 자세한 기준은 헤더 버튼의 모달에서.
+const FormulaInline = styled.p`
   margin: 0;
   font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.textMuted};
 `;
 
-const Grid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: ${({ theme }) => theme.spacing.md};
-  min-height: 0;
-  flex: 1;
+// ── 집계 band / 정렬·필터 컨트롤 ─────────────────────────────────────────────
+
+const StatBand = styled.div`
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.lg};
+  flex-wrap: wrap;
+  padding: ${({ theme }) => theme.spacing.lg};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
 `;
+
+const StatGroup = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.xl};
+`;
+
+const Stat = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+// 통계 숫자 — 한눈에 들어오도록 크게(목록 비교의 기준값).
+const StatNum = styled.span`
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const StatLabel = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// 점수 분포 히스토그램 — 구간별 막대.
+const Histogram = styled.div`
+  display: flex;
+  align-items: flex-end;
+  gap: ${({ theme }) => theme.spacing.sm};
+  height: 80px;
+`;
+
+const HistoBar = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 40px;
+  height: 100%;
+`;
+
+const HistoFill = styled.div<{ $empty: boolean }>`
+  width: 100%;
+  min-height: ${({ $empty }) => ($empty ? '0' : '3px')};
+  background: ${({ theme, $empty }) =>
+    $empty ? 'transparent' : theme.colors.primary};
+  border-radius: 2px;
+`;
+
+const HistoCount = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const HistoLabel = styled.span`
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const Controls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const SortSelect = styled.select`
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-family: inherit;
+  color: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-family: inherit;
+  color: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+const ResultCount = styled.span`
+  margin-left: auto;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const PlaceholderBox = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.lg};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px dashed ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
+`;
+
+const PlaceholderTitle = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeMd};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const PlaceholderBody = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.6;
+  color: ${({ theme }) => theme.colors.textMuted};
+
+  strong {
+    color: ${({ theme }) => theme.colors.text};
+  }
+`;
+
+// ── 제출 표 — 한 줄씩 비교 가능한 컴팩트 행 ─────────────────────────────────────
+
+// 컬럼 폭 정의 — 헤더/본문 셀이 같은 그리드를 공유해 정렬을 맞춘다.
+const TABLE_COLUMNS =
+  'minmax(120px, 1.6fr) 116px 88px 64px 88px 88px 24px';
+
+const SubmissionTable = styled.div`
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
+  overflow: hidden;
+`;
+
+const TableHeadRow = styled.div`
+  display: grid;
+  grid-template-columns: ${TABLE_COLUMNS};
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const TableBody = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+`;
+
+type CellCol = 'name' | 'time' | 'test' | 'questions' | 'tokens' | 'score' | 'chevron';
+
+/** 점수·질문·토큰 등 수치 컬럼은 우측 정렬, 이름은 좌측 정렬. */
+const cellAlign = (col: CellCol): string =>
+  col === 'name' ? 'flex-start' : col === 'chevron' ? 'center' : 'flex-end';
+
+const HeadCell = styled.div<{ $col: CellCol }>`
+  display: flex;
+  justify-content: ${({ $col }) => cellAlign($col)};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const TableRow = styled.div`
+  display: grid;
+  grid-template-columns: ${TABLE_COLUMNS};
+  gap: ${({ theme }) => theme.spacing.sm};
+  align-items: center;
+  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+  cursor: pointer;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  transition: background 0.12s ease;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.surfaceAlt};
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.primary};
+    outline-offset: -2px;
+  }
+`;
+
+const BodyCell = styled.div<{ $col: CellCol }>`
+  display: flex;
+  justify-content: ${({ $col }) => cellAlign($col)};
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme, $col }) =>
+    $col === 'name' ? theme.font.weightBold : theme.font.weightRegular};
+  color: ${({ theme, $col }) =>
+    $col === 'name' ? theme.colors.text : theme.colors.textMuted};
+
+  ${({ $col }) =>
+    $col === 'chevron' &&
+    `font-size: 13px;`}
+`;
+
+// 점수대별 색으로 한눈에 구분: 80↑ 강조(primary) · 60–79 주의(warning) · 60 미만 위험(danger).
+const ScoreBadge = styled.span<{ $score: number }>`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme, $score }) =>
+    $score >= 80
+      ? theme.colors.primary
+      : $score >= 60
+        ? theme.colors.warning
+        : theme.colors.danger};
+  white-space: nowrap;
+`;
+
+// ── 제출 상세 모달 본문(탭) ──────────────────────────────────────────────────
+
+const HeaderMeta = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: ${({ theme }) => theme.spacing.md};
+  min-width: 0;
+  flex-wrap: wrap;
+`;
+
+const HeaderMetaItem = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const DetailLayout = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+`;
+
+const TabBar = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.lg}`};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+`;
+
+const Tab = styled.button<{ $active: boolean }>`
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.md}`};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid
+    ${({ theme, $active }) => ($active ? theme.colors.primary : 'transparent')};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  background: ${({ theme, $active }) =>
+    $active ? theme.colors.surface : 'transparent'};
+  color: ${({ theme, $active }) =>
+    $active ? theme.colors.text : theme.colors.textMuted};
+  transition: color 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.text};
+  }
+`;
+
+const TabPanel = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: ${({ theme }) => theme.spacing.lg};
+`;
+
+// ── 채점 기준 모달 본문 ───────────────────────────────────────────────────────
 
 const ScoreModel = styled.div`
   margin-bottom: ${({ theme }) => theme.spacing.md};
@@ -657,203 +1099,7 @@ const AiMeta = styled.p`
   color: ${({ theme }) => theme.colors.textMuted};
 `;
 
-// ── 집계 band / 정렬·필터 컨트롤 ─────────────────────────────────────────────
-
-const StatBand = styled.div`
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: ${({ theme }) => theme.spacing.md};
-  flex-wrap: wrap;
-  padding: ${({ theme }) => theme.spacing.md};
-  margin-bottom: ${({ theme }) => theme.spacing.sm};
-  background: ${({ theme }) => theme.colors.surfaceAlt};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
-`;
-
-const StatGroup = styled.div`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.lg};
-`;
-
-const Stat = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const StatNum = styled.span`
-  font-size: ${({ theme }) => theme.font.sizeLg};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-const StatLabel = styled.span`
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-// 점수 분포 히스토그램 — 구간별 막대.
-const Histogram = styled.div`
-  display: flex;
-  align-items: flex-end;
-  gap: ${({ theme }) => theme.spacing.xs};
-  height: 64px;
-`;
-
-const HistoBar = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-  width: 34px;
-  height: 100%;
-`;
-
-const HistoFill = styled.div<{ $empty: boolean }>`
-  width: 100%;
-  min-height: ${({ $empty }) => ($empty ? '0' : '3px')};
-  background: ${({ theme, $empty }) =>
-    $empty ? 'transparent' : theme.colors.primary};
-  border-radius: 2px;
-`;
-
-const HistoCount = styled.span`
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-const HistoLabel = styled.span`
-  font-size: 9px;
-  color: ${({ theme }) => theme.colors.textMuted};
-  white-space: nowrap;
-`;
-
-const Controls = styled.div`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.sm};
-  margin-bottom: ${({ theme }) => theme.spacing.sm};
-`;
-
-const SortSelect = styled.select`
-  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  font-family: inherit;
-  color: ${({ theme }) => theme.colors.text};
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
-`;
-
-const SearchInput = styled.input`
-  flex: 1;
-  min-width: 0;
-  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  font-family: inherit;
-  color: ${({ theme }) => theme.colors.text};
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
-
-  &:focus {
-    outline: none;
-    border-color: ${({ theme }) => theme.colors.primary};
-  }
-`;
-
-const PlaceholderBox = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.sm};
-  padding: ${({ theme }) => theme.spacing.lg};
-  background: ${({ theme }) => theme.colors.surfaceAlt};
-  border: 1px dashed ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.md};
-`;
-
-const PlaceholderTitle = styled.p`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.sizeMd};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-const PlaceholderBody = styled.p`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  line-height: 1.6;
-  color: ${({ theme }) => theme.colors.textMuted};
-
-  strong {
-    color: ${({ theme }) => theme.colors.text};
-  }
-`;
-
-const SubmissionList = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.sm};
-  overflow-y: auto;
-`;
-
-const SubmissionItem = styled.li`
-  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
-  background: ${({ theme }) => theme.colors.surfaceAlt};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
-`;
-
-const SubmissionSummary = styled.div`
-  display: flex;
-  align-items: center;
-  gap: ${({ theme }) => theme.spacing.sm};
-`;
-
-const StudentName = styled.span`
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-const SubmittedAt = styled.span`
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  color: ${({ theme }) => theme.colors.textMuted};
-  white-space: nowrap;
-`;
-
-const TestMeta = styled.span`
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  color: ${({ theme }) => theme.colors.textMuted};
-  white-space: nowrap;
-`;
-
-// 점수대별 색으로 한눈에 구분: 80↑ 강조(primary) · 60–79 주의(warning) · 60 미만 위험(danger).
-const ScoreBadge = styled.span<{ $score: number }>`
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme, $score }) =>
-    $score >= 80
-      ? theme.colors.primary
-      : $score >= 60
-        ? theme.colors.warning
-        : theme.colors.danger};
-  white-space: nowrap;
-`;
-
-const Detail = styled.details`
-  margin-top: ${({ theme }) => theme.spacing.xs};
-`;
+// ── 상세 탭 공통(루브릭/타임라인/코드) ───────────────────────────────────────
 
 const DetailSummary = styled.summary`
   cursor: pointer;
@@ -865,7 +1111,6 @@ const DetailBody = styled.div`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.sm};
-  padding-top: ${({ theme }) => theme.spacing.sm};
 `;
 
 const CriterionScoreList = styled.ul`
@@ -882,6 +1127,9 @@ const CriterionScoreRow = styled.li`
   align-items: center;
   justify-content: space-between;
   gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border-radius: ${({ theme }) => theme.radius.sm};
 `;
 
 const CriterionScoreDesc = styled.span`
@@ -891,12 +1139,13 @@ const CriterionScoreDesc = styled.span`
 
 const CriterionScoreValue = styled.span`
   font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
   color: ${({ theme }) => theme.colors.primary};
   white-space: nowrap;
 `;
 
 const FeedbackText = styled.p`
-  margin: 0;
+  margin: ${({ theme }) => theme.spacing.sm} 0 0;
   font-size: ${({ theme }) => theme.font.sizeSm};
   line-height: 1.6;
   color: ${({ theme }) => theme.colors.textMuted};
@@ -985,7 +1234,7 @@ const DiffFileTag = styled.span`
 `;
 
 const DiffPre = styled.div`
-  max-height: 320px;
+  max-height: 360px;
   overflow: auto;
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radius.sm};
@@ -1041,7 +1290,7 @@ const CodePath = styled.div`
 // 제출 코드 — 모노스페이스 블록(가로/세로 스크롤, 줄바꿈 보존).
 const CodeBlock = styled.pre`
   margin: 0;
-  max-height: 320px;
+  max-height: 480px;
   overflow: auto;
   padding: ${({ theme }) => theme.spacing.sm};
   background: ${({ theme }) => theme.colors.surface};

@@ -53,17 +53,20 @@ npm run build        # 프로덕션 빌드
 npm run typecheck    # 타입 체크 (tsc --noEmit, 빌드 없이)
 npm run lint         # ESLint + 레이어 규칙 검사
 npm run test         # vitest 실행
+npm run seed:admin   # 최초 관리자 계정 생성 (ADMIN_SEED_* 환경변수, .env.local 로드)
 # git commit 시 husky가 자동으로 tsc + lint 실행 (lint-staged)
 ```
 
-- **환경 변수**: `.env.local`에 `GEMINI_API_KEY` 필요(AI 채팅 + 채점 공용). 자세히는 `.env.example`.
+- **환경 변수**: `.env.local`에 `GEMINI_API_KEY`(AI 채팅 + 채점 공용), `MONGODB_URI`(사용자 영속),
+  `JWT_SECRET`(세션 서명) 필요. 최초 관리자 시드용 `ADMIN_SEED_*`. 자세히는 `.env.example`.
 - **배포**: 미정 (코드 실행 채점 인프라 불필요 — 채점은 AI 정성 판정으로 일원화. WebContainer는 브라우저 내 실행)
 - **기술 스택**: Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query
   · Monaco Editor(`@monaco-editor/react`) · Vercel AI SDK(`ai` + `@ai-sdk/google`, Gemini) · react-markdown
   · **WebContainer**(`@webcontainer/api`, 브라우저 내 Node 런타임 — 피벗 P0~)
+  · **인증**: `jose`(JWT, Edge 호환) · `bcryptjs`(비밀번호 해시) · `mongodb`(사용자 영속)
   - ⚠️ WebContainer는 cross-origin isolation이 필수라 `next.config.ts`가 모든 응답에
     COOP(`same-origin`)+COEP(`require-corp`) 헤더를 주입한다. 새 외부 CDN/폰트 도입 시 CORP/CORS 점검 필수.
-  - _(MongoDB는 현재 미사용 — 위 「아키텍처 방향」 참조. 영속 도입 시 저장소는 사안별 결정)_
+  - _(MongoDB는 **사용 중** — 인증/사용자(users) 영속. 다른 도메인 데이터는 아직 localStorage)_
 
 ---
 
@@ -81,40 +84,49 @@ src/
 │   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (알고리즘 — AI 채점)
 │   ├── workspace/[challengeId]/page.tsx 학생 과제 풀이(워크스페이스) 진입점 (피벗 P1)
 │   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
-│   └── api/                      백엔드 (키 은닉·AI 프록시·채점)
-│       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage)
-│       ├── grade/route.ts        과제 공식 채점 (AI 루브릭 정성 채점 + 가중합, 피벗 P3)
-│       └── grade/algorithm/route.ts 알고리즘 공식 채점 (AI 정성 판정 — Judge0 대체, P5)
+│   ├── login/page.tsx · signup/page.tsx   인증 화면 진입점 (features/auth)
+│   ├── admin/users/page.tsx      사용자/역할 관리 진입점 (관리자 전용 — features/admin)
+│   └── api/                      백엔드 (키 은닉·AI 프록시·채점·인증)
+│       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage) — requireUser 가드
+│       ├── grade/route.ts        과제 공식 채점 (AI 루브릭 정성 채점 + 가중합, 피벗 P3) — requireUser 가드
+│       ├── grade/algorithm/route.ts 알고리즘 공식 채점 (AI 정성 판정 — Judge0 대체, P5) — requireUser 가드
+│       ├── auth/{signup,login,logout,me}/route.ts  이메일/비번 + JWT 세션
+│       └── admin/users/{route.ts,[userId]/route.ts}  사용자 목록·역할 변경 (admin)
+│
+├── proxy.ts                      페이지 라우트 인증/인가 게이트 (Edge, 구 middleware — Next.js 16 proxy)
 │
 ├── features/                     도메인별 기능 모듈 (세로 슬라이스)
 │   ├── author/                   교수(알고리즘): AuthorView, ProblemForm, TestCaseEditor,
 │   │                             AiPolicyFields(공용), useProblemDraft
 │   │                             + (피벗 P4) ChallengeAuthorView, useChallengeDraft, components/
 │   │                               ChallengeForm·FileSetEditor(프리셋·잠금 토글)·RubricEditor
-│   │                               + GradingDashboardView (채점 대시보드 — 집계(점수분포·루브릭평균·AI사용량) + 제출별 프롬프트-앵커 diff 타임라인)
-│   └── solve/                    학생(알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
-│                                 GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
-│                                 + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
-│                                   AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
-│                                   WorkspacePanel·WorkspaceEditorPanel·FileTree·WorkspacePlaygroundView
-│                                   + (피벗 P3) ChallengeGradingResultPanel(제출 채점 결과 모달)
+│   │                               + GradingDashboardView (채점 대시보드 — 집계(점수분포·루브릭평균·AI사용량) + 제출 비교표 → 행 클릭 시 중앙 모달에서 탭(루브릭·프롬프트-앵커 diff 타임라인·제출코드). 채점 기준도 헤더 버튼의 모달로 분리)
+│   ├── solve/                    학생(알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
+│   │                             GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
+│   │                             + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
+│   │                               AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
+│   │                               WorkspacePanel·WorkspaceEditorPanel·FileTree·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 요청 콘솔 — Postman 라이트)
+│   │                               + (피벗 P3) ChallengeGradingResultPanel(제출 채점 결과 모달)
+│   ├── auth/                     인증: LoginView, SignupView (이메일/비번 + JWT)
+│   └── admin/                    사용자 관리: AdminUsersView (역할 승격 — 관리자 전용)
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
-    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체)
+    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체) · authApi.ts (로그인/가입/로그아웃/me·관리자 사용자 fetch)
     │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (Zustand persist)
-    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), queryKeys.ts
-    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열)
+    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), authQueries.ts (useCurrentUser·login/signup/logout·관리자 사용자/역할), queryKeys.ts (auth·admin)
+    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열 / 인증 UserRole·AuthUser)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
     │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT))
     ├── lib/                      재사용 로직
-    │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
+    │   ├── auth/                 password.ts(bcryptjs 해시) · jwt.ts(jose 서명·검증 + SESSION_COOKIE) · session.ts(쿠키 발급/해제 · getCurrentUser·requireUser·requireRole 가드)
+    │   ├── db/                   mongodb.ts (연결 싱글턴 — lazy, getClient/getDb) · users.ts (users 컬렉션 리포지토리 — passwordHash 제외 매핑)
     │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
-    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
+    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출), lineDiff.ts (라인/파일트리 diff — 대시보드 코드 변경점)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트
-    │   ├── ui/                   Button, Panel, Badge, Markdown, QuotaMeter, Field, PageShell
+    │   ├── ui/                   Button, Panel, Modal(중앙 오버레이 — ESC·배경클릭 닫기·스크롤락), Badge, Markdown, QuotaMeter, Field, PageShell
     │   └── providers/            AppProviders, ThemeProvider, QueryProvider, styled 레지스트리
     └── reader/                   앱 진입점 오케스트레이터 (features 의존 허용 — 유일한 예외, 현재 미사용)
 ```
@@ -163,12 +175,14 @@ interface ListProps {
 - 서버 응답을 Zustand에 **복사 저장 금지** (Query 캐시가 단일 출처)
 - 데이터 호출은 `*Api.ts`에만. 컴포넌트는 Query 훅만 사용
 - Query key는 배열 팩토리로 중앙화: `queryKeys.{domain}.detail(id)` (`shared/core/queries/queryKeys.ts`)
-- _(MongoDB 사용 시에만)_ **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — DB 도입은 사안별 결정이며(2026-06-24 백엔드 최소화 해제), 저장소를 추가할 땐 별도 논의한다
+- **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — 인증/사용자 영속에 사용 중. 새 도메인 저장소를 추가할 땐 별도 논의한다(2026-06-24 백엔드 최소화 해제)
 
 **현재 구현**
 - 서버 데이터: 채점은 **mutation** — 과제는 `useGradeChallenge`(`gradeQueries.ts` → `/api/grade`),
   알고리즘은 `useGradeAlgorithm`(`algorithmGradeQueries.ts` → `/api/grade/algorithm`).
-  단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
+  인증/사용자는 `authQueries.ts` — 현재 사용자는 `useCurrentUser`(query, `queryKeys.auth.me`),
+  로그인/가입/로그아웃·관리자 사용자/역할은 mutation. **현재 사용자(서버 상태)는 Query가 단일 출처**(별도 auth store 없음).
+  `queryKeys.ts`는 `auth.me`·`admin.users`를 가진다.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
 - 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 — 채점결과+제출코드+AI프롬프트, 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
 
