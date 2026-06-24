@@ -89,6 +89,7 @@ src/
 │                                 + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
 │                                   AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
 │                                   WorkspacePanel·WorkspaceEditorPanel·FileTree·WorkspacePlaygroundView
+│                                   + (피벗 P3) ChallengeGradingResultPanel(제출 채점 결과 모달)
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태

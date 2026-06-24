@@ -9,7 +9,7 @@
  *    점수의 서버측 테스트 재실행(샌드박스)은 P3 이후 별도 단계로 붙는다(§7.2). 현재는
  *    클라이언트 autoTest를 참고 신호로 받되, 루브릭 채점은 서버에서 확정한다.
  *
- * 사용처: features/solve 제출 플로우(gradeApi → useGradeChallenge, P3/P4에서 연결)
+ * 사용처: features/solve 제출 플로우(ChallengeSolveView → useGradeChallenge → gradeApi, P3 연결)
  */
 import { grader } from '@/shared/lib/grader';
 import { computeFinalScore } from '@/shared/lib/grader/score';
@@ -32,7 +32,14 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const raw = await req.json();
+  // 잘못된/비어 있는 JSON 본문은 req.json()이 throw한다. 그대로 두면 처리 안 된
+  // 500이 되므로, 파싱 실패는 클라이언트 잘못으로 보고 400으로 명확히 돌려준다.
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return new Response('요청 본문(JSON) 파싱에 실패했습니다.', { status: 400 });
+  }
 
   const validationError = validateGradeRequest(raw);
   if (validationError) {
