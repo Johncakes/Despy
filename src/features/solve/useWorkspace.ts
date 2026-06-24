@@ -33,8 +33,14 @@ import {
   runCommand,
   startDevServer,
 } from '@/shared/lib/webcontainer/runtime';
-import { createFileSync, type FileSync } from '@/shared/lib/webcontainer/fileSync';
+import {
+  createFileSync,
+  removeWorkspacePath,
+  renameWorkspacePath,
+  type FileSync,
+} from '@/shared/lib/webcontainer/fileSync';
 import { runTests as runTestSuite } from '@/shared/lib/webcontainer/testRunner';
+import { FULLSTACK_PREVIEW_PORT } from '@/shared/core/constants/webcontainerTemplates';
 import { logger } from '@/shared/lib/utils/logger';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -74,6 +80,12 @@ export interface UseWorkspaceResult {
   setActivePath: (path: string) => void;
   /** 파일 내용을 갱신한다(버퍼 + debounce FS 동기화). 잠금 경로는 무시한다. */
   writeFile: (path: string, contents: string) => void;
+  /** 빈 새 파일을 생성하고 즉시 연다. 이미 있으면 열기만, 잠금 경로면 무시. */
+  createFile: (path: string) => void;
+  /** 파일 또는 폴더(경로 프리픽스) 전체를 삭제한다(버퍼+FS). 잠금 파일은 제외. */
+  deletePath: (path: string) => void;
+  /** 파일/폴더 경로를 변경(이동)한다. 잠금 파일 포함 시 무시. */
+  renamePath: (fromPath: string, toPath: string) => void;
   /** 해당 경로가 잠겨 있는지 */
   isPathLocked: (path: string) => boolean;
 
@@ -108,6 +120,20 @@ export interface UseWorkspaceResult {
 const WORKSPACE_PERSIST_DEBOUNCE_MS = 400;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * 풀스택 템플릿(프론트 Vite + 백 Express를 한 컨테이너에서 동시 구동)에서 미리보기로
+ * 확정할 프론트 포트를 추론한다. 두 서버가 각각 server-ready를 내므로, 프론트 포트만
+ * 골라야 미리보기에 백엔드 raw JSON이 아닌 프론트 화면이 꽂힌다. 단일 서버 템플릿
+ * (Vite 단독·Express 단독)은 undefined → 첫 server-ready로 확정한다(기존 동작 유지).
+ *
+ * 식별: vite.config.js(프론트)와 server/index.js(백)를 모두 가진 템플릿 = 풀스택.
+ * persist 스키마(ChallengeProblem)에 필드를 더하지 않으려고 템플릿 내용으로 추론한다.
+ */
+function inferPreviewPort(template: ProjectFiles): number | undefined {
+  const isFullstack = 'vite.config.js' in template && 'server/index.js' in template;
+  return isFullstack ? FULLSTACK_PREVIEW_PORT : undefined;
+}
 
 /** 초기 활성 파일: src/App.jsx 우선, 없으면 첫 편집 가능 파일, 그것도 없으면 첫 파일 */
 function pickDefaultActivePath(
@@ -154,6 +180,8 @@ export function useWorkspace(
   // 파일 델타 영속(IndexedDB) debounce 타이머. 최신 파일 버퍼는 ref로 읽는다.
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filesRef = useRef<ProjectFiles>(template);
+  // 활성 파일 경로를 ref로 미러링 — 삭제/이름변경 콜백에서 최신 활성 파일을 동기로 읽는다.
+  const activePathRef = useRef<string>('');
 
   // 영속 상태 구독: IndexedDB 복원 완료 여부 + 과제별 AI 사용량(없으면 0).
   // 파일 델타는 구독하지 않는다(boot 시 동기 조회) — 편집 중 불필요한 재렌더 방지.
@@ -193,6 +221,11 @@ export function useWorkspace(
     filesRef.current = files;
   }, [files]);
 
+  // 활성 파일 경로를 ref로 미러링(삭제/이름변경 후 활성 파일 보정용).
+  useEffect(() => {
+    activePathRef.current = activePath;
+  }, [activePath]);
+
   // 편집 델타를 debounce 후 IndexedDB(workspaceStore)에 저장한다. challengeId가
   // 없으면(PoC) 영속하지 않는다. 즉시 호출(flush=true)은 언마운트 시 사용한다.
   const persistFileDelta = useCallback(() => {
@@ -227,6 +260,99 @@ export function useWorkspace(
       if (challengeId) useWorkspaceStore.getState().saveActivePath(challengeId, path);
     },
     [challengeId],
+  );
+
+  // 빈 새 파일을 생성하고 즉시 연다(버퍼 + FS). 이미 있으면 열기만, 잠금 경로면 무시.
+  // 부모 디렉토리는 FS 동기화 시 자동으로 mkdir된다(fileSync.writeWorkspaceFile).
+  const createFile = useCallback(
+    (path: string) => {
+      if (!path || lockedSet.has(path)) return;
+      if (filesRef.current[path] !== undefined) {
+        setActivePath(path); // 이미 존재하면 내용 보존 — 열기만 한다
+        return;
+      }
+      const next = { ...filesRef.current, [path]: '' };
+      filesRef.current = next;
+      setFiles(next);
+      fileSyncRef.current?.schedule(path, '');
+      scheduleFileDeltaPersist();
+      setActivePath(path);
+    },
+    [lockedSet, scheduleFileDeltaPersist, setActivePath],
+  );
+
+  // 파일 또는 폴더(경로 프리픽스) 전체를 삭제한다(버퍼 + FS). 잠금 파일은 보호를 위해
+  // 삭제 대상에서 제외한다. 열려 있던 파일이 사라지면 다른 파일로 전환한다.
+  const deletePath = useCallback(
+    (path: string) => {
+      if (!path) return;
+      const prefix = `${path}/`;
+      const affected = Object.keys(filesRef.current).filter(
+        (candidate) => candidate === path || candidate.startsWith(prefix),
+      );
+      const deletable = affected.filter((candidate) => !lockedSet.has(candidate));
+      if (deletable.length === 0) return;
+
+      const next = { ...filesRef.current };
+      for (const candidate of deletable) {
+        delete next[candidate];
+        fileSyncRef.current?.cancel(candidate); // 대기 중인 쓰기가 파일을 되살리지 않도록
+      }
+      filesRef.current = next;
+      setFiles(next);
+
+      // FS에서도 제거한다(개별 — 폴더에 잠금 파일이 남아 있을 수 있어 폴더 일괄 rm은 피한다).
+      for (const candidate of deletable) {
+        void removeWorkspacePath(candidate).catch((error) =>
+          logger.error('[useWorkspace] 파일 삭제 실패', candidate, error),
+        );
+      }
+      scheduleFileDeltaPersist();
+
+      if (deletable.includes(activePathRef.current)) {
+        setActivePath(pickDefaultActivePath(next, lockedPaths));
+      }
+    },
+    [lockedSet, lockedPaths, scheduleFileDeltaPersist, setActivePath],
+  );
+
+  // 파일/폴더 경로를 변경(이동)한다 — 폴더면 하위 전체 경로를 함께 remap한다.
+  // 잠금 파일이 포함되면(경로가 바뀌면 잠금 매칭이 깨지므로) 거부하고, 대상 경로가
+  // 이미 존재하면(충돌) 덮어쓰기를 막기 위해 중단한다.
+  const renamePath = useCallback(
+    (fromPath: string, toPath: string) => {
+      if (!fromPath || !toPath || fromPath === toPath) return;
+      const prefix = `${fromPath}/`;
+      const affected = Object.keys(filesRef.current).filter(
+        (candidate) => candidate === fromPath || candidate.startsWith(prefix),
+      );
+      if (affected.length === 0) return;
+      if (affected.some((candidate) => lockedSet.has(candidate))) return;
+
+      const remap = (candidate: string) =>
+        candidate === fromPath ? toPath : `${toPath}${candidate.slice(fromPath.length)}`;
+
+      const next = { ...filesRef.current };
+      if (affected.some((candidate) => next[remap(candidate)] !== undefined)) return;
+
+      for (const candidate of affected) {
+        next[remap(candidate)] = next[candidate];
+        delete next[candidate];
+        fileSyncRef.current?.cancel(candidate);
+      }
+      filesRef.current = next;
+      setFiles(next);
+
+      void renameWorkspacePath(fromPath, toPath).catch((error) =>
+        logger.error('[useWorkspace] 경로 변경 실패', fromPath, toPath, error),
+      );
+      scheduleFileDeltaPersist();
+
+      if (affected.includes(activePathRef.current)) {
+        setActivePath(remap(activePathRef.current));
+      }
+    },
+    [lockedSet, scheduleFileDeltaPersist, setActivePath],
   );
 
   // AI 응답 1턴을 사용량에 기록(영속). challengeId 없으면(PoC) no-op.
@@ -309,7 +435,12 @@ export function useWorkspace(
 
       setPhase('starting');
       appendLog('[despy] npm run dev 시작…\n');
-      const { url } = await startDevServer('npm', ['run', 'dev'], appendLog);
+      // 풀스택 템플릿은 프론트·백 두 포트가 server-ready를 내므로 프론트 포트만 골라
+      // 미리보기를 확정한다(단일 서버 템플릿은 previewPort=undefined → 첫 이벤트로 확정).
+      const { url } = await startDevServer('npm', ['run', 'dev'], {
+        onOutput: appendLog,
+        previewPort: inferPreviewPort(template),
+      });
 
       setPreviewUrl(url);
       setPhase('ready');
@@ -363,6 +494,9 @@ export function useWorkspace(
     lockedPaths,
     setActivePath,
     writeFile,
+    createFile,
+    deletePath,
+    renamePath,
     isPathLocked,
     runTests,
     testResult,

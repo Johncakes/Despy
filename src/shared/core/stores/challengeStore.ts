@@ -7,7 +7,7 @@
  * 그 영속은 P4에서 IndexedDB로 도입한다 — docs/spec-webcontainer.md §9.1.)
  * 저장된 과제가 없으면 샘플 과제로 시드한다.
  *
- * persist key: 'despy-challenges' (version 2)
+ * persist key: 'despy-challenges' (version 3)
  *
  * 사용처: features/author(CRUD, P4), features/solve(읽기), app 홈(목록)
  */
@@ -63,12 +63,24 @@ export const useChallengeStore = create<ChallengeStoreState>()(
     }),
     {
       name: 'despy-challenges',
-      version: 2,
+      version: 3,
       // v1→v2: RubricCriterion에 levels?·rationale?(둘 다 optional)를 추가했다. 기존
       // 항목은 두 필드가 없을 뿐 그대로 유효하므로 데이터 변환이 필요 없다. 다만
       // version만 올리고 migrate를 비우면 persist가 구버전 상태를 폐기해 저장된 과제가
       // 사라지므로, 상태를 그대로 통과시키는 migrate를 둔다(과제 보존).
-      migrate: (persistedState) => persistedState as ChallengeStoreState,
+      //
+      // v2→v3: 새 샘플 과제(풀스택 Todo 등)를 기존 사용자에게도 노출한다. id가 이미 있는
+      // 과제는 사용자 데이터 보존을 위해 그대로 두고, 없는 샘플만 덧붙인다(additive). 본인이
+      // 출제한 과제는 보존되지만, 이전에 삭제했던 샘플은 다시 추가될 수 있다(시드 보강 목적).
+      migrate: (persistedState) => {
+        const state = persistedState as ChallengeStoreState;
+        const existing = state.challenges ?? [];
+        const existingIds = new Set(existing.map((item) => item.id));
+        const missingSamples = SAMPLE_CHALLENGES.filter(
+          (sample) => !existingIds.has(sample.id),
+        );
+        return { ...state, challenges: [...existing, ...missingSamples] };
+      },
     },
   ),
 );

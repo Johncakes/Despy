@@ -125,23 +125,51 @@ export async function runCommandWithTimeout(
   }
 }
 
+/** startDevServer 옵션 */
+export interface StartDevServerOptions {
+  /** 프로세스 출력 스트림 콜백(콘솔 패널 연결용). */
+  onOutput?: OutputListener;
+  /**
+   * 미리보기로 확정할 포트(풀스택 멀티포트용). 지정하면 이 포트의 server-ready에서만
+   * resolve하고 다른 포트(예: 백엔드 API)의 이벤트는 무시한다. 생략하면 첫 server-ready로
+   * 확정한다(단일 서버 템플릿 — 기존 동작 유지).
+   */
+  previewPort?: number;
+}
+
 /**
  * dev 서버를 띄우고 `server-ready` 이벤트를 기다려 접속 정보를 반환한다.
  * dev 프로세스는 계속 살아 있으므로 exit를 await하지 않고, server-ready로 resolve한다.
  * 준비 전에 프로세스가 종료되면(설정 오류 등) reject한다.
+ *
+ * 풀스택(프론트 Vite + 백 Express 동시 구동)은 포트마다 server-ready가 발생하므로
+ * options.previewPort로 미리보기에 꽂을 프론트 포트만 골라 resolve한다. 백엔드 포트는
+ * Vite proxy(같은 컨테이너 localhost) 뒤로만 쓰이므로 미리보기 URL이 필요 없다.
+ *
+ * onOutput은 하위호환을 위해 양식 두 가지를 모두 받는다:
+ *   - 함수: 기존 시그니처(onOutput 콜백)
+ *   - 객체: StartDevServerOptions(onOutput + previewPort)
  */
 export async function startDevServer(
   command: string,
   args: string[],
-  onOutput?: OutputListener,
+  onOutputOrOptions?: OutputListener | StartDevServerOptions,
 ): Promise<DevServerInfo> {
+  const options: StartDevServerOptions =
+    typeof onOutputOrOptions === 'function'
+      ? { onOutput: onOutputOrOptions }
+      : (onOutputOrOptions ?? {});
+
   const container = await bootWebContainer();
   const process = await container.spawn(command, args);
   devProcess = process;
-  pipeOutput(process, onOutput);
+  pipeOutput(process, options.onOutput);
 
   return new Promise<DevServerInfo>((resolve, reject) => {
     const unsubscribe = container.on('server-ready', (port, url) => {
+      // previewPort가 지정되면 그 포트(프론트)에서만 미리보기를 확정하고,
+      // 다른 포트(백엔드 API 등)의 server-ready는 무시하고 계속 기다린다.
+      if (options.previewPort !== undefined && port !== options.previewPort) return;
       unsubscribe();
       resolve({ port, url });
     });

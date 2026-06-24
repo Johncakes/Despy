@@ -24,8 +24,12 @@ const DEFAULT_DEBOUNCE_MS = 250;
 export interface FileSync {
   /** 경로의 최신 내용을 예약(debounce 후 FS 기록) */
   schedule: (path: string, contents: string) => void;
-  /** 대기 중인 모든 쓰기를 취소(언마운트 정리용) */
-  cancel: () => void;
+  /**
+   * 대기 중인 쓰기를 취소한다. path를 주면 그 경로만, 생략하면 전체(언마운트 정리용).
+   * 삭제·이름변경 직전에 해당 경로를 취소해, 대기 중이던 쓰기가 사라진 파일을
+   * 되살리는 것을 막는다.
+   */
+  cancel: (path?: string) => void;
 }
 
 // ── 공개 API ─────────────────────────────────────────────────────────────────
@@ -42,6 +46,28 @@ export async function writeWorkspaceFile(path: string, contents: string): Promis
     await container.fs.mkdir(path.slice(0, lastSlash), { recursive: true });
   }
   await container.fs.writeFile(path, contents);
+}
+
+/**
+ * 워크스페이스 파일/폴더를 FS에서 제거한다(폴더면 하위 전체). 없으면 무시(force).
+ * 부팅 전이면 먼저 부팅한다.
+ */
+export async function removeWorkspacePath(path: string): Promise<void> {
+  const container = await bootWebContainer();
+  await container.fs.rm(path, { recursive: true, force: true });
+}
+
+/**
+ * 워크스페이스 파일/폴더 경로를 변경(이동)한다. 대상의 부모 디렉토리를 보장한 뒤
+ * rename한다(폴더면 하위 전체가 함께 이동). 부팅 전이면 먼저 부팅한다.
+ */
+export async function renameWorkspacePath(fromPath: string, toPath: string): Promise<void> {
+  const container = await bootWebContainer();
+  const lastSlash = toPath.lastIndexOf('/');
+  if (lastSlash > 0) {
+    await container.fs.mkdir(toPath.slice(0, lastSlash), { recursive: true });
+  }
+  await container.fs.rename(fromPath, toPath);
 }
 
 /**
@@ -72,10 +98,17 @@ export function createFileSync(delayMs: number = DEFAULT_DEBOUNCE_MS): FileSync 
         setTimeout(() => flush(path), delayMs),
       );
     },
-    cancel() {
-      for (const timer of timers.values()) clearTimeout(timer);
-      timers.clear();
-      latestContents.clear();
+    cancel(path) {
+      if (path === undefined) {
+        for (const timer of timers.values()) clearTimeout(timer);
+        timers.clear();
+        latestContents.clear();
+        return;
+      }
+      const timer = timers.get(path);
+      if (timer) clearTimeout(timer);
+      timers.delete(path);
+      latestContents.delete(path);
     },
   };
 }

@@ -14,5 +14,13 @@
  */
 
 export const queryKeys = {
+  auth: {
+    /** 현재 로그인 사용자(/api/auth/me) */
+    me: ['auth', 'me'] as const,
+  },
+  admin: {
+    /** 전체 사용자 목록(/api/admin/users) */
+    users: ['admin', 'users'] as const,
+  },
   // 도메인별 query key를 여기에 추가한다. (예: exams, problems, submissions)
 } as const;

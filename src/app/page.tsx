@@ -13,6 +13,7 @@ import Link from 'next/link';
 import styled from 'styled-components';
 import { useChallengeStore } from '@/shared/core/stores/challengeStore';
 import { useProblemStore } from '@/shared/core/stores/problemStore';
+import { useCurrentUser, useLogout } from '@/shared/core/queries/authQueries';
 import { useHasMounted } from '@/shared/lib/hooks/useHasMounted';
 import { Button } from '@/shared/components/ui/Button';
 import { Panel } from '@/shared/components/ui/Panel';
@@ -21,19 +22,60 @@ export default function HomePage() {
   const hasMounted = useHasMounted();
   const challenges = useChallengeStore((state) => state.challenges);
   const problems = useProblemStore((state) => state.problems);
+  const { data: currentUser } = useCurrentUser();
+  const logout = useLogout();
+
+  const isAuthor = currentUser?.role === 'professor' || currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin';
 
   return (
     <Main>
       <Header>
-        <Title>despy</Title>
+        <TopBar>
+          <Title>despy</Title>
+          {hasMounted && (
+            <AccountArea>
+              {currentUser ? (
+                <>
+                  <AccountName>
+                    {currentUser.name}
+                    <RoleTag>
+                      {currentUser.role === 'admin'
+                        ? '관리자'
+                        : currentUser.role === 'professor'
+                          ? '교수'
+                          : '학생'}
+                    </RoleTag>
+                  </AccountName>
+                  <Button variant="ghost" onClick={() => logout.mutate()}>
+                    로그아웃
+                  </Button>
+                </>
+              ) : (
+                <Link href="/login">
+                  <Button variant="primary">로그인</Button>
+                </Link>
+              )}
+            </AccountArea>
+          )}
+        </TopBar>
         <Subtitle>에이전틱 코딩 평가 시스템 — 통제된 AI로 알고리즘 문제 풀기</Subtitle>
         <HeaderActions>
-          <Link href="/author/challenge">
-            <Button variant="primary">교수 모드 — 과제 출제</Button>
-          </Link>
-          <Link href="/author">
-            <Button variant="ghost">알고리즘 문제 출제</Button>
-          </Link>
+          {isAuthor && (
+            <>
+              <Link href="/author/challenge">
+                <Button variant="primary">교수 모드 — 과제 출제</Button>
+              </Link>
+              <Link href="/author">
+                <Button variant="ghost">알고리즘 문제 출제</Button>
+              </Link>
+            </>
+          )}
+          {isAdmin && (
+            <Link href="/admin/users">
+              <Button variant="ghost">사용자 관리</Button>
+            </Link>
+          )}
           <Link href="/playground">
             <Button variant="ghost">WebContainer PoC →</Button>
           </Link>
@@ -100,6 +142,36 @@ const Header = styled.div`
   flex-direction: column;
   align-items: flex-start;
   gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const TopBar = styled.div`
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
+const AccountArea = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const AccountName = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.xs};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const RoleTag = styled.span`
+  padding: 2px ${({ theme }) => theme.spacing.xs};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.info};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
 `;
 
 const Title = styled.h1`

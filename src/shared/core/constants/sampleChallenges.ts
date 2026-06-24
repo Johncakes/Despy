@@ -17,6 +17,8 @@ import {
   VITE_REACT_SAMPLE_LOCKED_PATHS,
   EXPRESS_TODO_API_TEMPLATE,
   EXPRESS_TODO_API_LOCKED_PATHS,
+  FULLSTACK_TODO_TEMPLATE,
+  FULLSTACK_TODO_LOCKED_PATHS,
 } from '@/shared/core/constants/webcontainerTemplates';
 
 export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
@@ -234,6 +236,64 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
         },
       ],
       weights: { tests: 0.3, rubric: 0.7 },
+    },
+
+    aiPolicy: { ...DEFAULT_AI_POLICY },
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: 'sample-fullstack-todo',
+    title: '풀스택 Todo — 프론트 폼 + 백엔드 POST 바이브코딩',
+    statement: [
+      '한 컨테이너에서 프론트(Vite+React)와 백(Express)이 함께 돕니다. 프론트의 "추가" 폼은',
+      '이미 `POST /api/todos`를 호출하지만, **백엔드에 그 엔드포인트가 없어** 아직 동작하지 않습니다.',
+      'AI 도우미를 활용해 **`POST /api/todos`(백엔드)를 구현**해 폼이 실제로 동작하게 만드세요.',
+      '',
+      '### 요구사항',
+      '- `server/app.js`의 `createApp()` 안에 `POST /api/todos` 라우트를 추가한다.',
+      '- 요청 body의 `{ title }`을 받아 새 할 일을 추가한다.',
+      '- 새 항목은 `{ id, title, done: false }` 형태이며 `id`는 자동 증가한다.',
+      '- 성공 시 상태 코드 `201`과 생성된 항목(JSON)을 반환한다.',
+      '- 구현하면 미리보기의 "추가" 버튼이 즉시 동작한다(프론트→Vite proxy→Express).',
+      '',
+      '### 계약 (자동 채점이 의존하는 약속)',
+      '- 백엔드 채점 스펙은 `server/app.test.js`(supertest), 프론트는 `src/App.test.jsx`이며 **둘 다 잠겨 있다**.',
+      '- 빌드/실행 설정(`package.json`·`vite.config.js`·`server/index.js` 등)도 **잠겨 있어** 수정할 수 없다.',
+      '- 콘솔의 `npm test`로 프론트·백 양쪽 통과 여부를 한 번에 확인할 수 있다(저장소는 인메모리).',
+    ].join('\n'),
+
+    template: FULLSTACK_TODO_TEMPLATE,
+    lockedPaths: [...FULLSTACK_TODO_LOCKED_PATHS],
+    editablePaths: ['server/app.js', 'src/App.jsx', 'src/index.css'],
+
+    setupCommands: ['npm install'],
+    devCommand: 'npm run dev',
+    testCommand: 'npm test',
+
+    // 가시 테스트(App.test.jsx·app.test.js)가 채점 계약을 겸한다. 서버측 재실행(§7.2)은 후속.
+    testFiles: {},
+    rubric: {
+      criteria: [
+        {
+          id: 'post-endpoint-works',
+          description:
+            'POST /api/todos가 { title }을 받아 201과 생성 항목을 반환하고, 이후 GET 목록에 포함된다.',
+          maxScore: 55,
+        },
+        {
+          id: 'frontend-wires-up',
+          description:
+            '프론트의 "추가" 폼이 백엔드와 연결되어, 추가한 항목이 화면 목록에 즉시 반영된다.',
+          maxScore: 25,
+        },
+        {
+          id: 'code-quality',
+          description: '프론트·백 라우트 구현이 단순하고 일관되며 불필요한 중복이 없다.',
+          maxScore: 20,
+        },
+      ],
+      weights: { tests: 0.4, rubric: 0.6 },
     },
 
     aiPolicy: { ...DEFAULT_AI_POLICY },

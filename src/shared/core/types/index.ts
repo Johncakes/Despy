@@ -297,6 +297,32 @@ export interface GradingRequest {
   systemPrompt?: string;
 }
 
+// ── 인증 / 사용자 (실서비스 전환 — JWT + MongoDB) ──────────────────────────────
+//
+// MVP에는 인증이 없었으나 실서비스 전환을 위해 이메일/비밀번호 + JWT 인증과
+// 역할 기반 접근(RBAC)을 도입한다. 신원은 인증으로 확인하고, 권한(무엇을 할 수
+// 있나)은 role로 결정한다. (docs/spec-production-v1.md)
+
+/**
+ * 사용자 역할. 신규 가입자는 기본 'student'이며, 관리자가 'professor'로 승격한다.
+ * - student: 풀이·제출·본인 결과 조회
+ * - professor: 출제·AI정책·채점 대시보드 (본인 출제분)
+ * - admin: 전체 사용자/역할 관리
+ */
+export type UserRole = 'student' | 'professor' | 'admin';
+
+/**
+ * 클라이언트에 노출되는 안전한 사용자 표현 — passwordHash 등 민감 필드를 제외한다.
+ * 서버 DB의 UserDoc(shared/lib/db/users.ts)에서 이 형태로만 직렬화해 응답한다.
+ */
+export interface AuthUser {
+  /** UserDoc._id 문자열 */
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+}
+
 // ── AI 사용량 ──────────────────────────────────────────────────────────────
 
 /**

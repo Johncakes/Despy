@@ -13,6 +13,7 @@
  */
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { streamText, convertToModelMessages, type UIMessage } from 'ai';
+import { requireUser, authErrorToResponse } from '@/shared/lib/auth/session';
 import type { AgentUsageMetadata } from '@/shared/core/types';
 
 export const runtime = 'nodejs';
@@ -64,6 +65,15 @@ const EDIT_OUTPUT_CONTRACT = [
 // ── Handler ───────────────────────────────────────────────────────────────
 
 export async function POST(req: Request): Promise<Response> {
+  // 인증 가드 — 로그인한 사용자만 AI 프록시를 사용할 수 있다.
+  try {
+    await requireUser();
+  } catch (error) {
+    const authResponse = authErrorToResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
+  }
+
   const apiKey =
     process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 

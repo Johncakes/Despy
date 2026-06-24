@@ -18,6 +18,9 @@ AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문
 - **채점** (`app/api/grade/algorithm`): AI 정성 채점 — 코드를 실행하지 않고 테스트케이스 기준으로
   정답성을 판정한다(Judge0 실행 채점 제거 — P5, 2026-06-24). 무결성 한계(실행 아닌 추론)는 UI에 명시.
 - **AI 계층** (`app/api/agent`): Gemini 프록시 — 키 은닉 + 시스템 프롬프트 주입 + 출력 토큰 한도
+- **인증/권한** (`features/auth`·`features/admin`·`app/api/auth`·`app/api/admin`): 이메일/비밀번호 +
+  JWT 세션 로그인, 역할(학생/교수/관리자) 기반 접근 통제(RBAC). 사용자는 MongoDB에 영속.
+  자가 가입은 기본 `student`이며 관리자가 교수로 승격. (실서비스 전환 — `docs/spec-production-v1.md`)
 
 > 상세 명세는 별도 기획 문서 참조.
 >
@@ -35,7 +38,7 @@ AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문
   단순해도 되는 것은 클라이언트에 둔다.
 - **DB는 필요 시 도입 가능.** 기존 "MongoDB 지양"은 완화되어, 영속이 필요하면 저장소를 도입한다.
   구체적 선택(IndexedDB·Postgres·MongoDB 등)은 요구사항이 구체화되는 시점에 사안별로 결정한다.
-  → `shared/lib/db/mongodb.ts`·`MONGODB_URI`는 현재 미사용(스타터 잔재).
+  → `shared/lib/db/mongodb.ts`·`MONGODB_URI`는 **인증/사용자 영속에 사용 중**(실서비스 전환 — users 컬렉션).
 - ⚠️ 새 백엔드 서비스·DB·외부 의존성을 *추가*하는 것은 영향이 크므로 도입 전 논의(Blocking)한다 —
   단 "백엔드를 두는 것 자체"는 더 이상 금지가 아니다.
 
@@ -103,11 +106,11 @@ src/
     │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), queryKeys.ts
     │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
-    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드)
+    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT))
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
     │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
-    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
+    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출), lineDiff.ts (라인/파일트리 diff — 대시보드 코드 변경점)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트
@@ -171,7 +174,7 @@ interface ListProps {
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v2, 피벗 — 루브릭 레벨 anchor 추가), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v1, 피벗 — localStorage), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v3, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3)), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v1, 피벗 — localStorage), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 

@@ -17,6 +17,7 @@ import {
   validateGradeRequest,
   asGradeRequest,
 } from '@/shared/lib/grader/requestValidation';
+import { requireUser, authErrorToResponse } from '@/shared/lib/auth/session';
 import { logger } from '@/shared/lib/utils/logger';
 import type { ChallengeGradingResult } from '@/shared/core/types';
 
@@ -25,6 +26,15 @@ export const runtime = 'nodejs';
 // ── Handler ───────────────────────────────────────────────────────────────
 
 export async function POST(req: Request): Promise<Response> {
+  // 인증 가드 — 로그인한 사용자만 채점을 요청할 수 있다.
+  try {
+    await requireUser();
+  } catch (error) {
+    const authResponse = authErrorToResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
+  }
+
   if (!grader.isAvailable()) {
     return new Response(
       'AI API 키가 설정되지 않았습니다. .env.local에 GEMINI_API_KEY를 추가하세요.',
