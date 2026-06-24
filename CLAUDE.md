@@ -99,11 +99,11 @@ src/
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
     │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체)
-    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), problemStore.ts(알고리즘), solveSessionStore.ts (Zustand persist)
+    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (Zustand persist)
     │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), queryKeys.ts
     │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
-    │                             webcontainerTemplates.ts (샘플 Vite+React 트리)
+    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드)
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
     │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
@@ -167,11 +167,11 @@ interface ListProps {
   알고리즘은 `useGradeAlgorithm`(`algorithmGradeQueries.ts` → `/api/grade/algorithm`).
   단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 채점결과 — 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v1, 피벗 — localStorage), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 

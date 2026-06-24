@@ -11,6 +11,11 @@
  *
  * 본 출제용 프리셋 템플릿은 후속 단계(P4 출제 도구)에서 별도로 확장한다.
  *
+ * 프론트(Vite+React) 외에 **백엔드(Express) 과제 템플릿**(EXPRESS_TODO_API_TEMPLATE)도
+ * 여기 둔다. WebContainer 런타임은 서버 종류를 가리지 않아(server-ready는 포트를 여는
+ * 모든 프로세스에서 발생), Express 앱도 동일하게 npm install→dev(listen)→미리보기로
+ * 돈다. 채점은 Vitest + supertest(앱을 인프로세스로 올려 HTTP 검증)로 한다.
+ *
  * 사용처: features/solve/WorkspacePlaygroundView(PoC), sampleChallenges(샘플 과제)
  */
 import type { ProjectFiles } from '@/shared/core/types';
@@ -199,4 +204,131 @@ export const VITE_REACT_SAMPLE_LOCKED_PATHS: readonly string[] = [
   'package.json',
   'vite.config.js',
   'index.html',
+];
+
+// ── 백엔드(Express) 과제 템플릿 ─────────────────────────────────────────────
+
+/**
+ * 최소 Express + 인메모리 Todo API 스타터 (경로→파일 내용 평면 맵).
+ *
+ * 외부 DB·외부 네트워크 없이 자기완결형으로 동작한다(인메모리 — 서버 재시작 시 초기화).
+ * `createApp()`이 앱을 만드는 팩토리라, dev 서버(server.js)와 테스트(supertest)가
+ * 같은 정의를 공유한다. `npm test`는 Vitest(node 환경)로 supertest 케이스를 돌린다.
+ *
+ * 스타터에는 `GET /todos`만 구현돼 있고, `POST /todos`는 학생이 채워야 한다(아래
+ * 샘플 과제 sample-express-todo-api 참조). app.test.js는 채점 계약(스펙) 역할을 한다.
+ */
+export const EXPRESS_TODO_API_TEMPLATE: ProjectFiles = {
+  'package.json': JSON.stringify(
+    {
+      name: 'despy-express-todo-api',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        dev: 'node src/server.js',
+        test: 'vitest run',
+      },
+      dependencies: {
+        express: '^4.21.2',
+      },
+      devDependencies: {
+        supertest: '^7.0.0',
+        vitest: '^2.1.8',
+      },
+    },
+    null,
+    2,
+  ),
+
+  // 학생 주 작업 영역 — 라우트 정의. POST /todos를 여기에 구현한다.
+  'src/app.js': `import express from 'express';
+
+// 주어진 앱 팩토리 — server.js(미리보기)와 테스트(supertest)가 이 함수로 앱을 만든다.
+// 저장소는 인메모리이며, createApp() 호출마다 새 상태로 시작한다(테스트 격리).
+export function createApp() {
+  const app = express();
+  app.use(express.json());
+
+  let nextId = 3;
+  const todos = [
+    { id: 1, title: '우유 사기', done: false },
+    { id: 2, title: '운동하기', done: true },
+  ];
+
+  // 미리보기/상태 확인용 루트. 수정하지 않아도 된다.
+  app.get('/', (req, res) => {
+    res.json({ status: 'ok', endpoints: ['GET /todos', 'POST /todos'] });
+  });
+
+  // 할 일 목록 조회 — 이미 구현되어 있다.
+  app.get('/todos', (req, res) => {
+    res.json(todos);
+  });
+
+  // TODO: POST /todos 를 구현하세요.
+  //  - 요청 body의 { title }을 받아 새 할 일을 추가한다.
+  //  - 새 항목은 { id, title, done: false } 형태이며 id는 자동 증가한다.
+  //  - 성공 시 상태 코드 201과 생성된 항목(JSON)을 반환한다.
+  //  - 힌트: todos.push(...), nextId 활용, res.status(201).json(...)
+
+  return app;
+}
+`,
+
+  // 미리보기용 dev 서버(잠금) — 포트를 열어 server-ready 이벤트를 발생시킨다.
+  'src/server.js': `import { createApp } from './app.js';
+
+// WebContainer 미리보기를 위해 포트를 연다 — server-ready가 여기서 발생한다.
+const PORT = process.env.PORT || 3000;
+createApp().listen(PORT, () => {
+  console.log('despy todo API listening on http://localhost:' + PORT);
+});
+`,
+
+  // 채점 계약(스펙) — supertest로 앱을 인프로세스에 올려 HTTP 행동을 검증한다(잠금).
+  // GET 테스트는 스타터에서 통과하고, POST 테스트는 학생이 구현해야 통과한다(red→green).
+  'src/app.test.js': `import { describe, it, expect } from 'vitest';
+import request from 'supertest';
+import { createApp } from './app.js';
+
+describe('Todo API', () => {
+  it('GET /todos는 할 일 목록(배열)을 반환한다', async () => {
+    const res = await request(createApp()).get('/todos');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThan(0);
+  });
+
+  it('POST /todos는 새 할 일을 추가하고 201로 응답한다', async () => {
+    const res = await request(createApp())
+      .post('/todos')
+      .send({ title: '책 읽기' });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ title: '책 읽기', done: false });
+    expect(typeof res.body.id).toBe('number');
+  });
+
+  it('POST 후 GET 목록에 추가한 항목이 포함된다', async () => {
+    const app = createApp();
+    await request(app).post('/todos').send({ title: '청소하기' });
+    const res = await request(app).get('/todos');
+    const titles = res.body.map((todo) => todo.title);
+    expect(titles).toContain('청소하기');
+  });
+});
+`,
+};
+
+/**
+ * Express 백엔드 스타터에서 학생이 편집할 수 없는(read-only) 경로.
+ *
+ * package.json(빌드/의존성)·server.js(주어진 실행 골격)·app.test.js(채점 계약)는
+ * 잠그고, 라우트 정의(src/app.js)만 편집 가능하게 한다. 채점 스펙(app.test.js)을
+ * 잠가 무결성(테스트 변조 방지)을 지킨다.
+ */
+export const EXPRESS_TODO_API_LOCKED_PATHS: readonly string[] = [
+  'package.json',
+  'src/server.js',
+  'src/app.test.js',
 ];

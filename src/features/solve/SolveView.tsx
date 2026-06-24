@@ -61,7 +61,8 @@ export function SolveView({ problem }: { problem: Problem }) {
   }, [problem.id]);
 
   const handleAiCodeStream = useCallback(
-    (code: string) => {
+    // 알고리즘 풀이는 단일 코드 버퍼라 path는 무시하고 현재 코드에 반영한다.
+    (code: string, _path: string | null) => {
       setCode(problem.id, code);
     },
     [problem.id, setCode],

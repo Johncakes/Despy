@@ -6,9 +6,12 @@
  * 받아 한도를 차감한다(onTurnComplete). 한도 소진 시 입력이 비활성화된다.
  * 접힘(isOpen=false) 상태에서도 마운트를 유지해 대화 기록이 보존된다.
  *
- * 실시간 코드 미러링: '직접 편집'이 켜져 있으면 스트리밍 답변의 마지막 소스 코드
- * 블록을 토큰 단위로 추출해 콜백(onAiCodeStream)으로 에디터에 흘려보낸다.
- * 쓰기 시작 시 onAiCodeStreamStart(스냅샷), 종료 시 onAiCodeStreamEnd를 호출한다.
+ * 코드 안정 반영: '직접 편집'이 켜져 있으면 답변에서 **완성된 "파일 전체" 코드블록만**
+ * 추출(extractCompletedFileEdit)해 콜백(onAiCodeStream)으로 에디터에 반영한다. 부분
+ * 스니펫·쉘 명령·작성 중 블록은 걸러져 파일이 조각으로 덮어써지지 않는다. 또한 전송 시
+ * applyFullFile 플래그로 서버가 "전체 파일 출력 계약"을 AI에 덧붙이게 해 AI가 처음부터
+ * 파일 전체를 내도록 유도한다. 적용 직전 onAiCodeStreamStart(스냅샷), 종료 시
+ * onAiCodeStreamEnd를 호출한다.
  *
  * 코드 첨부(선택): getCodeContext가 주어지고 '코드 첨부' 토글이 켜져 있으면, 질문을
  * 보낼 때 현재 코드 상태를 메시지 뒤에 덧붙여 AI가 맥락을 보고 답하게 한다. 첨부분은
@@ -27,7 +30,7 @@ import styled from 'styled-components';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import type { AiPolicy, AgentUsageMetadata } from '@/shared/core/types';
-import { extractStreamingCodeBlock } from '@/shared/lib/utils/markdownCode';
+import { extractCompletedFileEdit } from '@/shared/lib/utils/markdownCode';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge } from '@/shared/components/ui/Badge';
 import { QuotaMeter } from '@/shared/components/ui/QuotaMeter';
@@ -57,10 +60,13 @@ interface AiChatPanelProps {
   /** AI가 에디터를 직접 편집할지 여부 */
   isDirectEditEnabled: boolean;
   onToggleDirectEdit: () => void;
-  /** 이번 답변에서 코드 작성을 시작할 때 1회 (부모가 현재 코드 스냅샷) */
+  /** 이번 답변에서 코드 적용을 시작할 때 1회 (부모가 현재 코드 스냅샷 — 되돌리기용) */
   onAiCodeStreamStart: () => void;
-  /** 추출된 코드를 에디터로 실시간 반영 */
-  onAiCodeStream: (code: string) => void;
+  /**
+   * 완성된 전체 파일을 에디터에 반영한다. path가 주어지면 그 파일에, null이면 활성
+   * 파일에 적용한다(부분 스니펫·쉘 명령은 호출되지 않음 — markdownCode가 걸러냄).
+   */
+  onAiCodeStream: (code: string, path: string | null) => void;
   /** 스트리밍 종료 (부모가 '작성 중' 해제) */
   onAiCodeStreamEnd: () => void;
   /**
@@ -124,9 +130,10 @@ export function AiChatPanel({
   const isQuotaExhausted = remainingQuestions <= 0 || remainingTokens <= 0;
   const canSend = input.trim().length > 0 && !isBusy && !isQuotaExhausted;
 
-  // ── 실시간 코드 미러링 ──────────────────────────────────────────────────
-  // 마지막 assistant 메시지의 텍스트(스트리밍 중 자람)를 합쳐 코드 블록을 추출.
-  // 값이 문자열/null이라 effect 의존성은 값 비교로 동작 → useMemo 불필요.
+  // ── 코드 반영(완성된 전체 파일만) ────────────────────────────────────────
+  // 마지막 assistant 메시지 텍스트(스트리밍 중 자람)에서 "완성된 전체 파일"만 추출해
+  // 에디터에 반영한다. 부분 스니펫·쉘 명령·작성 중 블록은 markdownCode가 걸러내므로
+  // 파일이 조각으로 덮어써지지 않는다(안정 반영). 값 비교로 동작 → useMemo 불필요.
   let lastAssistantText: string | null = null;
   let lastAssistantId: string | null = null;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -140,19 +147,27 @@ export function AiChatPanel({
     break;
   }
 
-  // 메시지별로 "코드 시작 스냅샷"을 1회만 찍기 위한 추적 ref
+  // 메시지별로 "스냅샷(되돌리기 기준)"을 1회만 찍기 위한 추적 ref
   const snapshotMessageIdRef = useRef<string | null>(null);
+  // 같은 내용을 중복 반영하지 않도록 마지막 적용분을 기억한다(메시지 id + 내용).
+  const appliedEditRef = useRef<{ id: string; content: string } | null>(null);
 
   useEffect(() => {
     if (!isDirectEditEnabled) return;
     if (lastAssistantText === null || lastAssistantId === null) return;
-    const code = extractStreamingCodeBlock(lastAssistantText);
-    if (code === null) return; // 코드 블록 없음 → 에디터 건드리지 않음
+    const edit = extractCompletedFileEdit(lastAssistantText);
+    if (edit === null) return; // 적용할 완성 파일 없음 → 에디터 건드리지 않음
+    // 동일 메시지에서 같은 내용을 이미 반영했으면 스킵(반복 write 방지).
+    const applied = appliedEditRef.current;
+    if (applied && applied.id === lastAssistantId && applied.content === edit.content) {
+      return;
+    }
     if (snapshotMessageIdRef.current !== lastAssistantId) {
       snapshotMessageIdRef.current = lastAssistantId;
-      onAiCodeStreamStart(); // 덮어쓰기 직전 현재 코드 스냅샷
+      onAiCodeStreamStart(); // 덮어쓰기 직전 현재 코드 스냅샷(되돌리기용)
     }
-    onAiCodeStream(code);
+    appliedEditRef.current = { id: lastAssistantId, content: edit.content };
+    onAiCodeStream(edit.content, edit.path);
   }, [
     isDirectEditEnabled,
     lastAssistantText,
@@ -179,6 +194,9 @@ export function AiChatPanel({
           systemPrompt: policy.systemPrompt,
           model: policy.model,
           maxOutputTokens: Math.min(remainingTokens, MAX_OUTPUT_TOKENS_CAP),
+          // 직접 편집(자동 반영)이 켜져 있으면 서버가 "전체 파일 출력 계약"을 시스템에
+          // 덧붙여, AI가 부분 조각 대신 파일 전체를 한 블록으로 내도록 유도한다.
+          applyFullFile: isDirectEditEnabled,
         },
       },
     );

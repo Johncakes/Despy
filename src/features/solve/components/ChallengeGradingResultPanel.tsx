@@ -10,6 +10,10 @@
  * criteria를 함께 받아 criterionId→설명/만점으로 매핑해 사람이 읽는 형태로 보여준다.
  * 구 GradingResultPanel(알고리즘 표준입출력)과 별개의 컴포넌트다.
  *
+ * 점수 투명성: 최종 점수가 "자동 테스트 통과율 × 비중 + 루브릭 득점률 × 비중"의
+ * 가중합(computeFinalScore와 동일 식)임을 산출표로 보여주고, 자동 테스트는 케이스별
+ * 통과/실패·실패 메시지까지 펼쳐 학생이 점수 근거를 검증할 수 있게 한다.
+ *
  * 사용처: features/solve/ChallengeSolveView (제출 후 결과 표시)
  */
 'use client';
@@ -17,6 +21,7 @@
 import styled from 'styled-components';
 import type {
   ChallengeGradingResult,
+  GradingRubric,
   RubricCriterion,
 } from '@/shared/core/types';
 import { Panel } from '@/shared/components/ui/Panel';
@@ -30,6 +35,8 @@ interface ChallengeGradingResultPanelProps {
   result: ChallengeGradingResult;
   /** 루브릭 항목(설명·만점) — 결과의 criterionId를 사람이 읽는 형태로 매핑한다 */
   criteria: RubricCriterion[];
+  /** 최종 점수 가중치(tests/rubric) — 점수 산출 과정을 투명하게 보여주기 위함 */
+  weights: GradingRubric['weights'];
   onClose: () => void;
 }
 
@@ -44,16 +51,30 @@ function pickScoreTone(score: number): ScoreTone {
   return 'danger';
 }
 
+/** 비율(0~1)을 정수 퍼센트 문자열로 — 통과율·득점률·비중 표시용 */
+function formatPercent(ratio: number): string {
+  return `${Math.round(ratio * 100)}%`;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function ChallengeGradingResultPanel({
   result,
   criteria,
+  weights,
   onClose,
 }: ChallengeGradingResultPanelProps) {
   const { autoTest, rubric, finalScore } = result;
   const allTestsPassed =
     autoTest.totalCount > 0 && autoTest.passedCount === autoTest.totalCount;
+
+  // 최종 점수 산출(서버 computeFinalScore와 동일 식)을 그대로 풀어 보여준다.
+  // 분모 0(테스트/항목 없음)은 0%로 처리한다.
+  const testsRatio =
+    autoTest.totalCount > 0 ? autoTest.passedCount / autoTest.totalCount : 0;
+  const rubricRatio = rubric.maxScore > 0 ? rubric.totalScore / rubric.maxScore : 0;
+  const testsContribution = testsRatio * weights.tests * 100;
+  const rubricContribution = rubricRatio * weights.rubric * 100;
 
   return (
     <Overlay onClick={onClose}>
@@ -72,8 +93,40 @@ export function ChallengeGradingResultPanel({
             <ScoreMax>/ 100</ScoreMax>
           </ScoreBlock>
 
-          <SummaryRow>
-            <SummaryLabel>자동 테스트</SummaryLabel>
+          <SectionTitle>점수 산출 방식</SectionTitle>
+          <Breakdown>
+            <BreakdownRow>
+              <BreakdownMain>
+                <BreakdownLabel>자동 테스트</BreakdownLabel>
+                <BreakdownContribution>
+                  +{testsContribution.toFixed(1)}점
+                </BreakdownContribution>
+              </BreakdownMain>
+              <BreakdownDetail>
+                {autoTest.passedCount}/{autoTest.totalCount} 통과 · 통과율{' '}
+                {formatPercent(testsRatio)} × 비중 {formatPercent(weights.tests)}
+              </BreakdownDetail>
+            </BreakdownRow>
+            <BreakdownRow>
+              <BreakdownMain>
+                <BreakdownLabel>AI 루브릭</BreakdownLabel>
+                <BreakdownContribution>
+                  +{rubricContribution.toFixed(1)}점
+                </BreakdownContribution>
+              </BreakdownMain>
+              <BreakdownDetail>
+                {rubric.totalScore}/{rubric.maxScore}점 · 득점률{' '}
+                {formatPercent(rubricRatio)} × 비중 {formatPercent(weights.rubric)}
+              </BreakdownDetail>
+            </BreakdownRow>
+            <BreakdownTotal>
+              <span>최종 점수 (가중합 반올림)</span>
+              <strong>{finalScore} / 100</strong>
+            </BreakdownTotal>
+          </Breakdown>
+
+          <SectionTitle>
+            자동 테스트 상세
             <Badge
               tone={
                 autoTest.totalCount === 0
@@ -85,14 +138,26 @@ export function ChallengeGradingResultPanel({
             >
               {autoTest.passedCount}/{autoTest.totalCount} 통과
             </Badge>
-          </SummaryRow>
-
-          <SummaryRow>
-            <SummaryLabel>루브릭</SummaryLabel>
-            <Badge tone="info">
-              {rubric.totalScore}/{rubric.maxScore}점
-            </Badge>
-          </SummaryRow>
+          </SectionTitle>
+          {autoTest.totalCount === 0 ? (
+            <EmptyNote>이 과제에는 자동 테스트가 없습니다.</EmptyNote>
+          ) : (
+            <TestCaseList>
+              {autoTest.cases.map((testCase, index) => (
+                <TestCaseItem key={`${testCase.name}-${index}`}>
+                  <TestCaseHeader>
+                    <TestCaseStatus $passed={testCase.passed}>
+                      {testCase.passed ? '통과' : '실패'}
+                    </TestCaseStatus>
+                    <TestCaseName>{testCase.name}</TestCaseName>
+                  </TestCaseHeader>
+                  {!testCase.passed && testCase.message && (
+                    <TestCaseMessage>{testCase.message}</TestCaseMessage>
+                  )}
+                </TestCaseItem>
+              ))}
+            </TestCaseList>
+          )}
 
           <SectionTitle>루브릭 항목</SectionTitle>
           <CriterionList>
@@ -162,23 +227,137 @@ const ScoreMax = styled.span`
   color: ${({ theme }) => theme.colors.textMuted};
 `;
 
-const SummaryRow = styled.div`
+const SectionTitle = styled.h2`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.sm};
-  margin-top: ${({ theme }) => theme.spacing.sm};
-`;
-
-const SummaryLabel = styled.span`
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-const SectionTitle = styled.h2`
   margin: ${({ theme }) => `${theme.spacing.lg} 0 ${theme.spacing.sm}`};
   font-size: ${({ theme }) => theme.font.sizeMd};
   font-weight: ${({ theme }) => theme.font.weightBold};
   color: ${({ theme }) => theme.colors.text};
+`;
+
+// ── 점수 산출표 ───────────────────────────────────────────────────────────────
+
+const Breakdown = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+`;
+
+const BreakdownRow = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const BreakdownMain = styled.div`
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const BreakdownLabel = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const BreakdownContribution = styled.span`
+  flex-shrink: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  font-variant-numeric: tabular-nums;
+`;
+
+const BreakdownDetail = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const BreakdownTotal = styled.div`
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-top: ${({ theme }) => theme.spacing.xs};
+  padding-top: ${({ theme }) => theme.spacing.sm};
+  border-top: 1px solid ${({ theme }) => theme.colors.border};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.text};
+
+  strong {
+    font-size: ${({ theme }) => theme.font.sizeMd};
+    color: ${({ theme }) => theme.colors.text};
+    font-variant-numeric: tabular-nums;
+  }
+`;
+
+// ── 자동 테스트 상세 ──────────────────────────────────────────────────────────
+
+const EmptyNote = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const TestCaseList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const TestCaseItem = styled.li`
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+`;
+
+const TestCaseHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const TestCaseStatus = styled.span<{ $passed: boolean }>`
+  flex-shrink: 0;
+  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme, $passed }) => ($passed ? theme.colors.success : theme.colors.danger)};
+  background: ${({ theme, $passed }) =>
+    `${$passed ? theme.colors.success : theme.colors.danger}22`};
+`;
+
+const TestCaseName = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.text};
+  word-break: break-word;
+`;
+
+const TestCaseMessage = styled.pre`
+  margin: ${({ theme }) => theme.spacing.sm} 0 0;
+  padding: ${({ theme }) => theme.spacing.sm};
+  max-height: 200px;
+  overflow: auto;
+  background: ${({ theme }) => theme.colors.codeBg};
+  color: ${({ theme }) => theme.colors.danger};
+  font-family: ${({ theme }) => theme.font.mono};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 `;
 
 const CriterionList = styled.ul`

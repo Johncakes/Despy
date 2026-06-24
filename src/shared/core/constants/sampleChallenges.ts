@@ -15,6 +15,8 @@ import { DEFAULT_AI_POLICY } from '@/shared/core/constants/aiPolicy';
 import {
   VITE_REACT_SAMPLE_TEMPLATE,
   VITE_REACT_SAMPLE_LOCKED_PATHS,
+  EXPRESS_TODO_API_TEMPLATE,
+  EXPRESS_TODO_API_LOCKED_PATHS,
 } from '@/shared/core/constants/webcontainerTemplates';
 
 export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
@@ -166,6 +168,62 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
           id: 'code-quality',
           description: '파생 값을 불필요한 상태 없이 단순하게 계산한다.',
           maxScore: 15,
+        },
+      ],
+      weights: { tests: 0.3, rubric: 0.7 },
+    },
+
+    aiPolicy: { ...DEFAULT_AI_POLICY },
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: 'sample-express-todo-api',
+    title: 'Todo API에 "할 일 추가" 엔드포인트 바이브코딩',
+    statement: [
+      '주어진 Express + 인메모리 Todo API에는 목록 조회(`GET /todos`)만 구현돼 있습니다.',
+      'AI 도우미를 활용해 **할 일을 추가하는 `POST /todos` 엔드포인트**를 구현하세요.',
+      '',
+      '### 요구사항',
+      '- `src/app.js`의 `createApp()` 안에 `POST /todos` 라우트를 추가한다.',
+      '- 요청 body의 `{ title }`을 받아 새 할 일을 추가한다.',
+      '- 새 항목은 `{ id, title, done: false }` 형태이며 `id`는 자동 증가한다.',
+      '- 성공 시 상태 코드 `201`과 생성된 항목(JSON)을 반환한다.',
+      '- 기존 `GET /todos`는 그대로 동작해야 한다.',
+      '',
+      '### 계약 (자동 채점이 의존하는 약속)',
+      '- 채점 스펙은 `src/app.test.js`(supertest)이며 **잠겨 있다** — 통과하도록 구현한다.',
+      '- 실행 골격(`src/server.js`)·의존성(`package.json`)도 **잠겨 있어** 수정할 수 없다.',
+      '- 콘솔의 `npm test`로 언제든 통과 여부를 확인할 수 있다(저장소는 인메모리).',
+    ].join('\n'),
+
+    template: EXPRESS_TODO_API_TEMPLATE,
+    lockedPaths: [...EXPRESS_TODO_API_LOCKED_PATHS],
+    editablePaths: ['src/app.js'],
+
+    setupCommands: ['npm install'],
+    devCommand: 'npm run dev',
+    testCommand: 'npm test',
+
+    // 가시 테스트(app.test.js)가 채점 계약을 겸한다. 서버측 재실행(§7.2)은 후속.
+    testFiles: {},
+    rubric: {
+      criteria: [
+        {
+          id: 'post-endpoint-works',
+          description:
+            'POST /todos가 { title }을 받아 201과 생성 항목을 반환하고, 이후 GET 목록에 포함된다.',
+          maxScore: 60,
+        },
+        {
+          id: 'get-still-works',
+          description: '기존 GET /todos가 여전히 정상 동작한다.',
+          maxScore: 20,
+        },
+        {
+          id: 'code-quality',
+          description: '라우트 구현이 단순하고 일관되며 불필요한 중복이 없다.',
+          maxScore: 20,
         },
       ],
       weights: { tests: 0.3, rubric: 0.7 },

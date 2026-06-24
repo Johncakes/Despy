@@ -56,24 +56,44 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
         <BackLink href="/author/challenge">← 과제 출제로 돌아가기</BackLink>
         <Title>채점 대시보드 — {challenge.title || '(제목 없음)'}</Title>
         <Subtitle>
-          이 과제의 학생 제출·점수를 모아 볼 화면입니다. 자세한 채점 기준은 아래 루브릭을
-          참고하세요.
+          이 과제의 학생 제출·점수를 모아 보는 화면입니다. 점수가 어떻게 계산되는지는 아래
+          &lsquo;채점 기준&rsquo;을 참고하세요.
         </Subtitle>
       </Header>
 
       <Grid>
-        <Panel title="채점 기준 (루브릭)">
-          <RubricMeta>
-            가중치 — 자동 테스트 {formatWeight(rubric.weights.tests)} · AI 루브릭{' '}
-            {formatWeight(rubric.weights.rubric)} / 루브릭 만점 합 {maxScoreSum}점
-          </RubricMeta>
+        <Panel title="채점 기준">
+          <ScoreModel>
+            <ScoreModelHead>최종 점수는 0~100점 — 두 축을 가중 합산합니다</ScoreModelHead>
+            <Formula>
+              최종 = 자동 테스트 통과율 × {formatWeight(rubric.weights.tests)} + 루브릭 득점률 ×{' '}
+              {formatWeight(rubric.weights.rubric)}
+            </Formula>
+            <ModelList>
+              <ModelItem>
+                <strong>자동 테스트 {formatWeight(rubric.weights.tests)}</strong> — 채점용 테스트를
+                돌려 나온 통과 비율(통과 수 ÷ 전체 수)을 점수로 환산.
+              </ModelItem>
+              <ModelItem>
+                <strong>AI 루브릭 {formatWeight(rubric.weights.rubric)}</strong> — 아래 항목들을 AI가
+                정성 평가한 점수의 합 ÷ 만점({maxScoreSum}점)을 점수로 환산.
+              </ModelItem>
+            </ModelList>
+          </ScoreModel>
+
+          <CriterionHeader>
+            AI 루브릭 항목
+            <CriterionHeaderHint>
+              합 {maxScoreSum}점 만점 · 득점률이 {formatWeight(rubric.weights.rubric)}로 환산
+            </CriterionHeaderHint>
+          </CriterionHeader>
           <CriterionList>
             {rubric.criteria.map((criterion, index) => (
               <CriterionRow key={criterion.id}>
                 <CriterionDesc>
                   #{index + 1} {criterion.description || '(설명 없음)'}
                 </CriterionDesc>
-                <CriterionScore>{criterion.maxScore}점</CriterionScore>
+                <CriterionScore>만점 {criterion.maxScore}점</CriterionScore>
               </CriterionRow>
             ))}
             {rubric.criteria.length === 0 && (
@@ -193,10 +213,67 @@ const Grid = styled.div`
   flex: 1;
 `;
 
-const RubricMeta = styled.p`
-  margin: 0 0 ${({ theme }) => theme.spacing.sm};
+const ScoreModel = styled.div`
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const ScoreModelHead = styled.p`
+  margin: 0;
   font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+// 계산식 — 학생/교수가 한눈에 보도록 강조색으로.
+const Formula = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.primary};
+`;
+
+const ModelList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+`;
+
+const ModelItem = styled.li`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.6;
   color: ${({ theme }) => theme.colors.textMuted};
+
+  strong {
+    color: ${({ theme }) => theme.colors.text};
+  }
+`;
+
+// 루브릭 항목 목록 헤더 — 좌측 제목 + 우측 "합/환산" 힌트.
+const CriterionHeader = styled.div`
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const CriterionHeaderHint = styled.span`
+  font-weight: 400;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  text-align: right;
 `;
 
 const CriterionList = styled.ul`

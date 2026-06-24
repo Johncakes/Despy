@@ -242,6 +242,7 @@ src/
         ├── stores/challengeStore.ts   — 과제 persist(despy-challenges) ✅ P1
         ├── stores/workspaceStore.ts   — 풀이 영속 persist(despy-workspace, IndexedDB+델타) ✅ P4
         ├── stores/idbStorage.ts       — IndexedDB StateStorage 어댑터(네이티브) ✅ P4
+        ├── stores/submissionStore.ts  — 제출 채점결과 persist(despy-submissions, localStorage) — 대시보드 소스 ✅
         ├── types/index.ts            — 신규 도메인 타입 전체 ✅
         └── constants/
             ├── webcontainerTemplates.ts — 샘플 템플릿(+vitest) ✅ P0/P1/P2
@@ -263,10 +264,14 @@ src/
   (`upsertChallenge`/`deleteChallenge`) 사용 — persist 스키마(`despy-challenges` v1) 변경 없음.
   구성: `features/author/ChallengeAuthorView`·`useChallengeDraft`·components/`ChallengeForm`·
   `FileSetEditor`(파일 세트 편집기·잠금 토글)·`RubricEditor`(+ `AiPolicyFields` 재사용).
-- 🟡 채점 대시보드 **진입점 스캐폴드** — `GradingDashboardView` + 라우트
+- ✅ 채점 대시보드 — `GradingDashboardView` + 라우트
   `/author/challenge/[challengeId]/submissions`(출제 편집 패널의 '채점 현황 →' 링크로 진입).
-  루브릭·AI정책 요약만 표시하고 학생 제출 목록은 빈 상태(제출 영속 모델 미도입 — 인증·다중
-  사용자와 함께 정해질 후속 단계). 현재 채점은 학생 화면 1회성이라 집계 데이터 소스가 없음.
+  루브릭·AI정책 요약 + **학생 제출 목록**(이름·시각·점수, 최신순 / 펼치면 루브릭 항목별 점수·피드백)을
+  표시한다. 데이터 소스는 신규 `submissionStore`(`despy-submissions`, localStorage) — 학생이 제출해
+  채점 성공 시 `ChallengeSolveView`가 결과를 입력한 이름/별명과 함께 저장한다(②→③ 고리 연결).
+  ⚠️ MVP 한계: 인증·서버 집계 없음 → 이 브라우저에서 이뤄진 제출만, 식별은 입력 이름에 의존.
+  검증: 단위테스트(submissionStore) + headless Chrome로 제출 시드→대시보드 렌더(이름·점수·최신순·
+  루브릭·피드백) 8/8 PASS.
 - ✅ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — in-memory 버퍼·AI 사용량 대체.
   `idbStorage`(네이티브 어댑터) + `workspaceStore`(델타) + `useWorkspace`(복원/저장·hasHydrated 게이트)
   + `ChallengeSolveView`(AI 사용량 영속화). headless Chrome로 편집→IDB 저장→새로고침 복원 실측 PASS.

@@ -114,21 +114,29 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   }, [workspace.phase, router]);
 
   // 미러링 콜백을 안정화(useCallback)해 AiChatPanel의 미러링 effect가 매 렌더
-  // 재실행되지 않게 한다. 활성 파일 경로는 ref로 읽어 콜백을 재생성하지 않는다.
-  // (ref 갱신은 렌더 중이 아니라 effect에서 수행 — react-hooks/refs 규칙)
+  // 재실행되지 않게 한다. 활성 파일 경로·파일 버퍼는 ref로 읽어 콜백을 재생성하지
+  // 않는다. (ref 갱신은 렌더 중이 아니라 effect에서 수행 — react-hooks/refs 규칙)
   const activePathRef = useRef(activePath);
   useEffect(() => {
     activePathRef.current = activePath;
   }, [activePath]);
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   const handleAiCodeStreamStart = useCallback(() => {
     setIsAiWriting(true);
   }, []);
 
   const handleAiCodeStream = useCallback(
-    (code: string) => {
-      // AI가 쓴 코드펜스를 현재 활성 파일에 미러링 → FS → HMR.
-      writeFile(activePathRef.current, code);
+    (code: string, path: string | null) => {
+      // AI가 낸 완성 파일을 대상 파일에 반영 → FS → HMR. AI가 적은 경로(path)가 현재
+      // 파일트리에 실제로 있을 때만 그 파일에 적용하고(잘못된/환각 경로로 엉뚱한 파일을
+      // 만들지 않게), 없으면 현재 활성 파일에 적용한다. 잠금 파일이면 writeFile이 무시.
+      const targetPath =
+        path && filesRef.current[path] !== undefined ? path : activePathRef.current;
+      writeFile(targetPath, code);
     },
     [writeFile],
   );
@@ -146,10 +154,6 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
 
   // 질문에 첨부할 현재 코드 상태 — 지금 에디터에 열린 활성 파일의 경로+내용을 보낸다.
   // 전송 시점에 호출되므로 최신 버퍼를 ref로 읽어 콜백 재생성을 피한다.
-  const filesRef = useRef(files);
-  useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
   const getCodeContext = useCallback(() => {
     const path = activePathRef.current;
     const contents = filesRef.current[path] ?? '';
@@ -281,6 +285,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         <ChallengeGradingResultPanel
           result={gradingResult}
           criteria={challenge.rubric.criteria}
+          weights={challenge.rubric.weights}
           onClose={() => setGradingResult(null)}
         />
       )}
