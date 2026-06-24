@@ -418,6 +418,20 @@ const Actions = styled.div`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.xs};
+  overflow-x: auto;
+  white-space: nowrap;
+  
+  &::-webkit-scrollbar {
+    height: 4px;
+    display: none;
+  }
+  &:hover::-webkit-scrollbar {
+    display: block;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: ${({ theme }) => theme.colors.border};
+    border-radius: 4px;
+  }
 `;
 
 const Tab = styled.button<{ $active: boolean }>`
@@ -429,6 +443,7 @@ const Tab = styled.button<{ $active: boolean }>`
   border: 1px solid transparent;
   background: transparent;
   color: ${({ theme }) => theme.colors.textMuted};
+  flex-shrink: 0;
 
   ${({ theme, $active }) =>
     $active &&
