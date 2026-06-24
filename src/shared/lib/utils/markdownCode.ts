@@ -1,55 +1,56 @@
 /**
- * markdownCode.ts — 마크다운 코드블록에서 "적용할 전체 파일"을 추출하는 유틸
+ * markdownCode.ts — AI 답변에서 "부분 교체(SEARCH/REPLACE) 편집"을 파싱·적용하는 유틸
  *
- * AI 답변(마크다운)을 에디터에 반영할 때, 단순히 "마지막 코드블록"을 파일에 덮어쓰면
- * AI가 부분 스니펫(예: `<p>…</p>` 한 줄, `const x = …` 조각)이나 실행 명령(```bash)을
- * 내놓을 때 그 조각이 파일 전체를 깨뜨린다. 그래서 Claude의 아티팩트처럼 **완성된(닫힌)
- * "파일 전체" 코드블록만** 골라 적용한다.
+ * 파일 전체를 다시 받아 덮어쓰면(토큰 낭비) 부분 스니펫이 파일을 깨뜨리는 사고가 났다.
+ * 대신 Claude/Aider의 편집 도구처럼 **"찾을 코드 → 바꿀 코드"** 한 쌍만 받아, 파일에서
+ * 정확히 일치하는 곳만 기계적으로 교체한다. 핵심은 안정성이다:
+ *  - SEARCH 텍스트가 **정확히 1곳**에 일치할 때만 적용한다.
+ *  - 못 찾거나(없음) 여러 곳에 모호하게 일치하면 **그 편집을 거부**한다(파일 보존).
+ *  - 따라서 낡은/잘못된 SEARCH가 파일을 훼손할 수 없다.
+ * 또한 전체 파일이 아니라 바뀐 부분만 오가므로 토큰 효율적이다.
  *
- * 적용 대상 판별:
- *  - 닫힌(여닫음이 끝난) 코드블록만 본다 — 작성 중인 블록은 무시(중간 상태 미반영).
- *  - 쉘/터미널 계열(```bash 등)은 제외.
- *  - info 줄에 파일 경로가 있거나(예: ```jsx src/App.jsx) 본문이 "파일 전체"로
- *    보이면(예: `export default` 포함) 적용 후보로 인정한다. 부분 스니펫은 후보가
- *    아니므로 반영되지 않는다(파일이 조각으로 덮어써지지 않음).
- *  - 후보가 여럿이면 가장 마지막(최신) 후보를 택한다.
+ * 형식(교수 가드레일과 별개로 앱이 AI에 주입하는 출력 계약 — agent/route.ts):
+ *   ```edit src/App.jsx        ← (선택) 첫 줄 info에 대상 파일 경로
+ *   <<<<<<< SEARCH
+ *   (파일에 있는 원본 코드 그대로)
+ *   =======
+ *   (바꿀 새 코드)
+ *   >>>>>>> REPLACE
+ *   ```
  *
- * 사용처: features/solve/AiChatPanel (AI 코드 → Monaco 안정 반영)
+ * 사용처: features/solve/AiChatPanel(파싱) · ChallengeSolveView/SolveView(파일에 적용)
  */
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-/** 에디터에 적용할 파일 편집(전체 내용). */
-export interface CompletedFileEdit {
-  /** info 줄에서 감지한 대상 파일 경로. 없으면 null → 호출측이 활성 파일에 적용. */
+/** AI가 제안한 부분 교체 1건. */
+export interface FileEdit {
+  /** 대상 파일 경로(편집 블록에서 감지). 없으면 null → 호출측이 활성/단일 파일에 적용. */
   path: string | null;
-  /** 적용할 파일 전체 내용 */
+  /** 파일에서 찾을 원본 텍스트(정확 일치) */
+  search: string;
+  /** 교체할 새 텍스트 */
+  replace: string;
+}
+
+/** 단일 파일에 편집 1건을 적용한 결과. */
+export interface ApplyEditResult {
+  ok: boolean;
+  /** 적용 성공 시 새 내용, 실패 시 원본 그대로 */
   content: string;
+  /** 실패 사유 — 'empty'(빈 SEARCH) · 'not-found'(없음) · 'ambiguous'(여러 곳 일치) */
+  reason?: 'empty' | 'not-found' | 'ambiguous';
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
 /**
- * 적용에서 제외할 코드 펜스 info 문자열(쉘/터미널/출력 계열).
- * 이 언어로 표시된 블록은 소스 파일이 아니므로 에디터에 반영하지 않는다.
+ * SEARCH/REPLACE 블록 매처. 마커 길이/공백/CRLF에 관대하게 잡는다.
+ * group1 = SEARCH 본문, group2 = REPLACE 본문(둘 다 비어 있을 수 있음).
+ * `>{3,} REPLACE`가 닫혀야(완성) 매칭되므로 작성 중(미완성) 블록은 잡히지 않는다.
  */
-const NON_MIRRORABLE_INFO = new Set([
-  'bash',
-  'sh',
-  'shell',
-  'zsh',
-  'console',
-  'terminal',
-  'cmd',
-  'powershell',
-  'ps1',
-  'text',
-  'plaintext',
-  'txt',
-  'diff',
-  'log',
-  'output',
-]);
+const SEARCH_REPLACE_RE =
+  /<{3,}\s*SEARCH[^\n]*\r?\n([\s\S]*?)\r?\n?={3,}[^\n]*\r?\n([\s\S]*?)\r?\n?>{3,}\s*REPLACE/g;
 
 /** 경로로 인정할 파일 확장자(코드/스타일/마크업 계열). */
 const PATH_EXTENSION = /\.(jsx?|tsx?|css|scss|html?|json|md|mjs|cjs|vue|svelte)$/;
@@ -57,62 +58,66 @@ const PATH_EXTENSION = /\.(jsx?|tsx?|css|scss|html?|json|md|mjs|cjs|vue|svelte)$
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
- * 마크다운에서 "에디터에 적용할 완성된 전체 파일"을 추출한다. 없으면 null.
- *
- * 부분 스니펫·쉘 명령·작성 중(미완성) 블록은 후보에서 제외되므로, 호출측은 반환값이
- * null이면 에디터를 건드리지 않으면 된다(조각으로 파일을 덮어쓰는 사고 방지).
+ * AI 답변(마크다운)에서 완성된 SEARCH/REPLACE 편집을 모두 파싱한다. 없으면 빈 배열.
+ * 각 편집의 path는 해당 블록 바로 앞 줄(펜스 info 또는 경로 줄)에서 추정한다(없으면 null).
  */
-export function extractCompletedFileEdit(markdown: string): CompletedFileEdit | null {
-  const segments = markdown.split('```');
-  // 펜스가 없으면 segments 길이가 1 → 코드 없음
-  if (segments.length < 2) return null;
-
-  // ``` 분할 시 홀수 인덱스 조각이 "펜스 내부"다. 그중 마지막 조각(=segments.length-1
-  // 이 홀수일 때)은 아직 닫히지 않은 작성 중 블록이므로 제외한다.
-  // 마지막 블록부터 뒤로 훑으며 첫 번째 "적용 후보"를 고른다(최신 우선).
-  for (let i = segments.length - 1; i >= 1; i -= 1) {
-    if (i % 2 === 0) continue; // 펜스 바깥(일반 텍스트 조각)
-    if (i === segments.length - 1) continue; // 닫히지 않은(작성 중) 마지막 블록 제외
-
-    const block = segments[i];
-    const firstNewline = block.indexOf('\n');
-    if (firstNewline === -1) continue; // info 줄만 있고 본문 없음
-
-    // 경로는 원본 케이싱이 중요하므로(src/App.jsx) info 원문에서 뽑고, 쉘 판별만
-    // 소문자 첫 토큰으로 한다.
-    const info = block.slice(0, firstNewline).trim();
-    const firstToken = info.split(/\s+/)[0]?.toLowerCase() ?? '';
-    if (NON_MIRRORABLE_INFO.has(firstToken)) continue; // 쉘/터미널 블록 제외
-
-    const content = block.slice(firstNewline + 1);
-    const path = detectPath(info);
-    // 경로 태그가 있거나 본문이 "파일 전체"로 보일 때만 적용 후보로 인정한다.
-    if (path === null && !looksLikeFullFile(content)) continue;
-
-    return { path, content };
+export function parseSearchReplaceEdits(markdown: string): FileEdit[] {
+  const edits: FileEdit[] = [];
+  for (const match of markdown.matchAll(SEARCH_REPLACE_RE)) {
+    const search = match[1] ?? '';
+    const replace = match[2] ?? '';
+    const before = markdown.slice(0, match.index ?? 0);
+    edits.push({ path: detectPathBefore(before), search, replace });
   }
+  return edits;
+}
 
-  return null;
+/**
+ * 단일 파일 내용에 편집 1건을 적용한다 — SEARCH가 **정확히 1곳**에 일치할 때만 교체한다.
+ * 빈 SEARCH·미일치·복수 일치는 거부해(원본 유지) 파일 훼손을 막는다.
+ */
+export function applyFileEdit(
+  content: string,
+  search: string,
+  replace: string,
+): ApplyEditResult {
+  if (search.length === 0) return { ok: false, content, reason: 'empty' };
+
+  const first = content.indexOf(search);
+  if (first === -1) return { ok: false, content, reason: 'not-found' };
+
+  const second = content.indexOf(search, first + search.length);
+  if (second !== -1) return { ok: false, content, reason: 'ambiguous' };
+
+  const next = content.slice(0, first) + replace + content.slice(first + search.length);
+  return { ok: true, content: next };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** info 줄에서 파일 경로 토큰을 찾는다(예: 'jsx src/App.jsx' → 'src/App.jsx'). 없으면 null. */
-function detectPath(info: string): string | null {
-  for (const token of info.split(/\s+/)) {
-    if (token.includes('/') || PATH_EXTENSION.test(token)) return token;
+/**
+ * 편집 블록 앞 텍스트에서 대상 파일 경로를 추정한다. 바로 앞의 비어 있지 않은 1~2줄
+ * (펜스 info `\`\`\`edit src/App.jsx` 또는 경로만 적힌 줄)에서 경로 토큰을 찾는다.
+ */
+function detectPathBefore(before: string): string | null {
+  const lines = before.split('\n');
+  let inspected = 0;
+  for (let i = lines.length - 1; i >= 0 && inspected < 2; i -= 1) {
+    const line = lines[i].trim();
+    if (line === '') continue;
+    inspected += 1;
+    const path = detectPathInLine(line);
+    if (path) return path;
   }
   return null;
 }
 
-/**
- * 본문이 "파일 전체"로 보이는지 판별한다 — 부분 스니펫과 구분하기 위한 보수적 휴리스틱.
- * 모듈 최상위 신호(`export default`·`export `·맨 앞 `import `)가 있으면 전체 파일로 본다.
- * 신호가 없으면(예: `<p>…</p>`, `const x = …` 조각) 적용하지 않아 파일 훼손을 막는다.
- */
-function looksLikeFullFile(content: string): boolean {
-  if (/\bexport\s+default\b/.test(content)) return true;
-  if (/^\s*export\s+/m.test(content)) return true;
-  if (/^\s*import\s+.+\bfrom\b/m.test(content)) return true;
-  return false;
+/** 한 줄에서 경로처럼 보이는 토큰을 찾는다(예: '```edit src/App.jsx' → 'src/App.jsx'). */
+function detectPathInLine(line: string): string | null {
+  // 펜스 백틱을 떼고 토큰 단위로 검사한다.
+  const stripped = line.replace(/`+/g, ' ');
+  for (const token of stripped.split(/\s+/)) {
+    if (token.includes('/') || PATH_EXTENSION.test(token)) return token;
+  }
+  return null;
 }

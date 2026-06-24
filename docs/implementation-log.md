@@ -266,12 +266,14 @@ src/
   `FileSetEditor`(파일 세트 편집기·잠금 토글)·`RubricEditor`(+ `AiPolicyFields` 재사용).
 - ✅ 채점 대시보드 — `GradingDashboardView` + 라우트
   `/author/challenge/[challengeId]/submissions`(출제 편집 패널의 '채점 현황 →' 링크로 진입).
-  루브릭·AI정책 요약 + **학생 제출 목록**(이름·시각·점수, 최신순 / 펼치면 루브릭 항목별 점수·피드백)을
-  표시한다. 데이터 소스는 신규 `submissionStore`(`despy-submissions`, localStorage) — 학생이 제출해
-  채점 성공 시 `ChallengeSolveView`가 결과를 입력한 이름/별명과 함께 저장한다(②→③ 고리 연결).
+  루브릭·AI정책 요약 + **학생 제출 목록**(이름·시각·점수, 최신순 / 펼치면 루브릭 항목별 점수·피드백 +
+  **학생 프롬프트**(AI 대화 트랜스크립트) + **제출 코드**(변경 파일별 코드블록))을 표시한다. 데이터
+  소스는 신규 `submissionStore`(`despy-submissions`, localStorage) — 학생이 제출해 채점 성공 시
+  `ChallengeSolveView`가 결과·이름·`submittedFiles`·`prompts`를 함께 저장한다(②→③ 고리 연결).
+  프롬프트는 `AiChatPanel.onMessagesChange`(선택 prop, 비파괴적)로 트랜스크립트를 부모 ref에 모아 캡처.
   ⚠️ MVP 한계: 인증·서버 집계 없음 → 이 브라우저에서 이뤄진 제출만, 식별은 입력 이름에 의존.
-  검증: 단위테스트(submissionStore) + headless Chrome로 제출 시드→대시보드 렌더(이름·점수·최신순·
-  루브릭·피드백) 8/8 PASS.
+  검증: 단위테스트(submissionStore) + headless Chrome로 시드 렌더(이름·점수·최신순·루브릭·피드백) 8/8,
+  프롬프트·코드 표시 6/6, 실제 제출→대시보드 e2e PASS.
 - ✅ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — in-memory 버퍼·AI 사용량 대체.
   `idbStorage`(네이티브 어댑터) + `workspaceStore`(델타) + `useWorkspace`(복원/저장·hasHydrated 게이트)
   + `ChallengeSolveView`(AI 사용량 영속화). headless Chrome로 편집→IDB 저장→새로고침 복원 실측 PASS.

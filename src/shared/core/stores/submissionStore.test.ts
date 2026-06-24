@@ -63,6 +63,21 @@ describe('addSubmission', () => {
     expect(store().submissions.c2).toHaveLength(1);
     expect(store().submissions.c2[0].studentName).toBe('Bob');
   });
+
+  it('제출 코드·프롬프트 스냅샷을 그대로 보관한다', () => {
+    store().addSubmission('c1', {
+      ...makeSubmission('s1', 'Alice', 87, 1000),
+      submittedFiles: { 'src/App.jsx': 'edited code' },
+      prompts: [
+        { role: 'user', text: '초기화 버튼 추가해줘' },
+        { role: 'assistant', text: '여기 코드입니다' },
+      ],
+    });
+    const saved = store().submissions.c1[0];
+    expect(saved.submittedFiles).toEqual({ 'src/App.jsx': 'edited code' });
+    expect(saved.prompts).toHaveLength(2);
+    expect(saved.prompts?.[0]).toEqual({ role: 'user', text: '초기화 버튼 추가해줘' });
+  });
 });
 
 // ── clearSubmissions ────────────────────────────────────────────────────────

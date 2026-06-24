@@ -167,7 +167,7 @@ interface ListProps {
   알고리즘은 `useGradeAlgorithm`(`algorithmGradeQueries.ts` → `/api/grade/algorithm`).
   단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 채점결과 — 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 — 채점결과+제출코드+AI프롬프트, 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)

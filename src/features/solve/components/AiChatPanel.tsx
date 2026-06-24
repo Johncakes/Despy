@@ -6,12 +6,13 @@
  * 받아 한도를 차감한다(onTurnComplete). 한도 소진 시 입력이 비활성화된다.
  * 접힘(isOpen=false) 상태에서도 마운트를 유지해 대화 기록이 보존된다.
  *
- * 코드 안정 반영: '직접 편집'이 켜져 있으면 답변에서 **완성된 "파일 전체" 코드블록만**
- * 추출(extractCompletedFileEdit)해 콜백(onAiCodeStream)으로 에디터에 반영한다. 부분
- * 스니펫·쉘 명령·작성 중 블록은 걸러져 파일이 조각으로 덮어써지지 않는다. 또한 전송 시
- * applyFullFile 플래그로 서버가 "전체 파일 출력 계약"을 AI에 덧붙이게 해 AI가 처음부터
- * 파일 전체를 내도록 유도한다. 적용 직전 onAiCodeStreamStart(스냅샷), 종료 시
- * onAiCodeStreamEnd를 호출한다.
+ * 코드 안정 반영(SEARCH/REPLACE): '직접 편집'이 켜져 있으면 답변이 끝났을 때 답변에서
+ * "찾을 코드 → 바꿀 코드" 블록을 파싱(parseSearchReplaceEdits)해 부모(onApplyAiEdits)에
+ * 넘긴다. 부모가 현재 파일에서 SEARCH가 **정확히 1곳** 일치할 때만 교체하므로(미일치·복수
+ * 일치는 거부) 부분 조각이 파일을 훼손하지 않고, 파일 전체가 아니라 바뀐 부분만 오가
+ * 토큰도 아낀다. 전송 시 autoApplyEdits 플래그로 서버가 이 출력 형식 계약을 AI에 덧붙인다.
+ * 적용 직전 onAiCodeStreamStart(스냅샷), 직후 onAiCodeStreamEnd를 호출하고, 반영 결과
+ * (몇 곳 반영/미반영)를 하단에 짧게 표시한다.
  *
  * 코드 첨부(선택): getCodeContext가 주어지고 '코드 첨부' 토글이 켜져 있으면, 질문을
  * 보낼 때 현재 코드 상태를 메시지 뒤에 덧붙여 AI가 맥락을 보고 답하게 한다. 첨부분은
@@ -25,12 +26,16 @@
  */
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import type { AiPolicy, AgentUsageMetadata } from '@/shared/core/types';
-import { extractCompletedFileEdit } from '@/shared/lib/utils/markdownCode';
+import type { SubmissionPromptTurn } from '@/shared/core/stores/submissionStore';
+import {
+  parseSearchReplaceEdits,
+  type FileEdit,
+} from '@/shared/lib/utils/markdownCode';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge } from '@/shared/components/ui/Badge';
 import { QuotaMeter } from '@/shared/components/ui/QuotaMeter';
@@ -48,6 +53,14 @@ const CODE_CONTEXT_DELIMITER = '\n\n[despy:현재 코드 상태]\n';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
+/** 코드 편집 반영 결과 — 몇 곳이 반영/미반영되었는지. */
+export interface EditApplyReport {
+  /** SEARCH가 정확히 일치해 교체된 편집 수 */
+  applied: number;
+  /** 미일치·복수 일치 등으로 거부된 편집 수 */
+  failed: number;
+}
+
 interface AiChatPanelProps {
   /** 교수가 설정한 AI 가드레일(모델·질문/토큰 한도·시스템 프롬프트) */
   aiPolicy: AiPolicy;
@@ -60,20 +73,26 @@ interface AiChatPanelProps {
   /** AI가 에디터를 직접 편집할지 여부 */
   isDirectEditEnabled: boolean;
   onToggleDirectEdit: () => void;
-  /** 이번 답변에서 코드 적용을 시작할 때 1회 (부모가 현재 코드 스냅샷 — 되돌리기용) */
+  /** 이번 답변의 코드 반영을 시작할 때 1회 (부모가 현재 코드 스냅샷 — 되돌리기용) */
   onAiCodeStreamStart: () => void;
   /**
-   * 완성된 전체 파일을 에디터에 반영한다. path가 주어지면 그 파일에, null이면 활성
-   * 파일에 적용한다(부분 스니펫·쉘 명령은 호출되지 않음 — markdownCode가 걸러냄).
+   * 파싱된 SEARCH/REPLACE 편집들을 현재 파일에 적용한다. 부모가 SEARCH 정확 일치 시에만
+   * 교체하고(미일치·복수 일치는 거부), 반영/미반영 건수를 리포트로 돌려준다.
    */
-  onAiCodeStream: (code: string, path: string | null) => void;
-  /** 스트리밍 종료 (부모가 '작성 중' 해제) */
+  onApplyAiEdits: (edits: FileEdit[]) => EditApplyReport;
+  /** 코드 반영 종료 (부모가 '작성 중' 해제) */
   onAiCodeStreamEnd: () => void;
   /**
    * 현재 코드 상태를 마크다운 문자열로 반환한다(전송 시점에 호출). 주어지면 '코드 첨부'
    * 토글이 노출되어, 켜져 있을 때 질문 뒤에 이 문자열을 덧붙여 보낸다. 없으면 토글 미노출.
    */
   getCodeContext?: () => string;
+  /**
+   * 대화가 바뀔 때마다 정리된 트랜스크립트(역할+텍스트, 코드첨부분 제외)를 부모에 전달한다.
+   * 제출 시 프롬프트 기록을 캡처하는 용도(선택 — 없으면 미동작). 스트리밍 중 자주 호출되므로
+   * 부모는 ref에 보관해 재렌더를 피하는 것이 좋다.
+   */
+  onMessagesChange?: (transcript: SubmissionPromptTurn[]) => void;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -88,6 +107,24 @@ function splitQuestionAndContext(text: string): [string, string | null] {
   return [text.slice(0, index), text.slice(index + CODE_CONTEXT_DELIMITER.length)];
 }
 
+/** 반영 리포트를 사람이 읽는 한 줄로(둘 다 0이면 null → 표시 안 함). */
+function formatApplyStatus(report: EditApplyReport): string | null {
+  const { applied, failed } = report;
+  if (applied === 0 && failed === 0) return null;
+  const parts: string[] = [];
+  if (applied > 0) parts.push(`✓ ${applied}곳 반영`);
+  if (failed > 0) parts.push(`⚠ ${failed}곳 미반영 (코드가 일치하지 않음)`);
+  return parts.join(' · ');
+}
+
+/** 메시지 parts에서 텍스트만 이어 붙인다. */
+function messageText(message: { parts: { type: string; text?: string }[] }): string {
+  return message.parts
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text ?? '')
+    .join('');
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function AiChatPanel({
@@ -100,9 +137,10 @@ export function AiChatPanel({
   isDirectEditEnabled,
   onToggleDirectEdit,
   onAiCodeStreamStart,
-  onAiCodeStream,
+  onApplyAiEdits,
   onAiCodeStreamEnd,
   getCodeContext,
+  onMessagesChange,
 }: AiChatPanelProps) {
   const policy = aiPolicy;
   const remainingQuestions = Math.max(policy.maxQuestions - questionsUsed, 0);
@@ -110,18 +148,33 @@ export function AiChatPanel({
   // 코드 첨부는 부모가 getCodeContext를 줄 때만 노출한다. 기본 ON(맥락 제공이 목적).
   const canAttachCode = typeof getCodeContext === 'function';
   const [isAttachCodeEnabled, setIsAttachCodeEnabled] = useState(true);
+  // 마지막 답변의 코드 반영 결과 한 줄(✓ 2곳 반영 · ⚠ 1곳 미반영). 없으면 미표시.
+  const [applyStatus, setApplyStatus] = useState<string | null>(null);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: '/api/agent' }),
     [],
   );
 
+  // ── 코드 반영(SEARCH/REPLACE, 답변 완료 시 1회) ──────────────────────────
+  // 답변이 끝나면 본문에서 SEARCH/REPLACE 편집을 파싱해 부모(onApplyAiEdits)가 현재
+  // 파일에 적용한다. 스트리밍 도중이 아니라 완료 시 한 번만 적용하므로 중간 상태가
+  // 에디터에 새지 않고, 부모가 SEARCH 정확 일치 시에만 교체해 파일 훼손을 막는다.
   const { messages, sendMessage, status, error } = useChat({
     transport,
     onFinish: ({ message }) => {
       const usage = message.metadata as AgentUsageMetadata | undefined;
       onTurnComplete(usage?.totalTokens ?? 0);
+      if (!isDirectEditEnabled) return;
+      const edits = parseSearchReplaceEdits(messageText(message));
+      if (edits.length === 0) {
+        setApplyStatus(null);
+        return;
+      }
+      onAiCodeStreamStart(); // 반영 직전 현재 코드 스냅샷(되돌리기용)
+      const report = onApplyAiEdits(edits);
       onAiCodeStreamEnd();
+      setApplyStatus(formatApplyStatus(report));
     },
   });
 
@@ -130,56 +183,28 @@ export function AiChatPanel({
   const isQuotaExhausted = remainingQuestions <= 0 || remainingTokens <= 0;
   const canSend = input.trim().length > 0 && !isBusy && !isQuotaExhausted;
 
-  // ── 코드 반영(완성된 전체 파일만) ────────────────────────────────────────
-  // 마지막 assistant 메시지 텍스트(스트리밍 중 자람)에서 "완성된 전체 파일"만 추출해
-  // 에디터에 반영한다. 부분 스니펫·쉘 명령·작성 중 블록은 markdownCode가 걸러내므로
-  // 파일이 조각으로 덮어써지지 않는다(안정 반영). 값 비교로 동작 → useMemo 불필요.
-  let lastAssistantText: string | null = null;
-  let lastAssistantId: string | null = null;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role !== 'assistant') continue;
-    lastAssistantId = message.id;
-    lastAssistantText = message.parts
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text)
-      .join('');
-    break;
-  }
-
-  // 메시지별로 "스냅샷(되돌리기 기준)"을 1회만 찍기 위한 추적 ref
-  const snapshotMessageIdRef = useRef<string | null>(null);
-  // 같은 내용을 중복 반영하지 않도록 마지막 적용분을 기억한다(메시지 id + 내용).
-  const appliedEditRef = useRef<{ id: string; content: string } | null>(null);
-
+  // 대화 트랜스크립트를 부모에 전달(제출 기록 캡처용). user 메시지는 코드 첨부분을 제외한
+  // 질문만 담는다(코드는 submittedFiles로 따로 저장). 스트리밍 중에도 갱신된다.
   useEffect(() => {
-    if (!isDirectEditEnabled) return;
-    if (lastAssistantText === null || lastAssistantId === null) return;
-    const edit = extractCompletedFileEdit(lastAssistantText);
-    if (edit === null) return; // 적용할 완성 파일 없음 → 에디터 건드리지 않음
-    // 동일 메시지에서 같은 내용을 이미 반영했으면 스킵(반복 write 방지).
-    const applied = appliedEditRef.current;
-    if (applied && applied.id === lastAssistantId && applied.content === edit.content) {
-      return;
+    if (!onMessagesChange) return;
+    const transcript: SubmissionPromptTurn[] = [];
+    for (const message of messages) {
+      if (message.role !== 'user' && message.role !== 'assistant') continue;
+      const text = message.parts
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+      const cleaned = message.role === 'user' ? splitQuestionAndContext(text)[0] : text;
+      transcript.push({ role: message.role, text: cleaned });
     }
-    if (snapshotMessageIdRef.current !== lastAssistantId) {
-      snapshotMessageIdRef.current = lastAssistantId;
-      onAiCodeStreamStart(); // 덮어쓰기 직전 현재 코드 스냅샷(되돌리기용)
-    }
-    appliedEditRef.current = { id: lastAssistantId, content: edit.content };
-    onAiCodeStream(edit.content, edit.path);
-  }, [
-    isDirectEditEnabled,
-    lastAssistantText,
-    lastAssistantId,
-    onAiCodeStreamStart,
-    onAiCodeStream,
-  ]);
+    onMessagesChange(transcript);
+  }, [messages, onMessagesChange]);
 
   const handleSend = () => {
     if (!canSend) return;
     const question = input;
     setInput('');
+    setApplyStatus(null); // 이전 반영 상태는 지운다(새 답변에서 다시 채워짐)
     // 코드 첨부가 켜져 있으면 현재 코드 상태를 질문 뒤에 덧붙인다. user 메시지로
     // 전달되므로 시스템 프롬프트(가드레일)를 건드리지 않는다.
     const codeContext =
@@ -194,9 +219,9 @@ export function AiChatPanel({
           systemPrompt: policy.systemPrompt,
           model: policy.model,
           maxOutputTokens: Math.min(remainingTokens, MAX_OUTPUT_TOKENS_CAP),
-          // 직접 편집(자동 반영)이 켜져 있으면 서버가 "전체 파일 출력 계약"을 시스템에
-          // 덧붙여, AI가 부분 조각 대신 파일 전체를 한 블록으로 내도록 유도한다.
-          applyFullFile: isDirectEditEnabled,
+          // 직접 편집(자동 반영)이 켜져 있으면 서버가 SEARCH/REPLACE 출력 계약을 시스템에
+          // 덧붙여, AI가 파일 전체가 아니라 바뀐 부분만 그 형식으로 내도록 유도한다.
+          autoApplyEdits: isDirectEditEnabled,
         },
       },
     );
@@ -236,7 +261,7 @@ export function AiChatPanel({
             checked={isDirectEditEnabled}
             onChange={onToggleDirectEdit}
           />
-          AI 직접 편집 (코드를 에디터에 실시간 작성)
+          AI 코드 자동 반영 (바뀐 부분만 에디터에 적용)
         </ToggleLabel>
         {canAttachCode && (
           <ToggleLabel>
@@ -247,6 +272,9 @@ export function AiChatPanel({
             />
             현재 코드 첨부 (질문에 지금 코드 상태를 함께 전송)
           </ToggleLabel>
+        )}
+        {isDirectEditEnabled && applyStatus && (
+          <ApplyStatus>{applyStatus}</ApplyStatus>
         )}
       </Controls>
 
@@ -378,6 +406,12 @@ const ToggleLabel = styled.label`
   font-size: ${({ theme }) => theme.font.sizeXs};
   color: ${({ theme }) => theme.colors.textMuted};
   cursor: pointer;
+`;
+
+// 마지막 답변의 코드 반영 결과 한 줄(✓ 반영 / ⚠ 미반영).
+const ApplyStatus = styled.div`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.text};
 `;
 
 const Quota = styled.div`

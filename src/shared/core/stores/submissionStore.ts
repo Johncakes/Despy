@@ -16,11 +16,18 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ChallengeGradingResult } from '@/shared/core/types';
+import type { ChallengeGradingResult, ProjectFiles } from '@/shared/core/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-/** 저장되는 제출 1건 — 채점 결과 + 식별 정보(이름/별명). */
+/** AI 대화 1턴(제출 기록에 보관) — 학생 프롬프트 또는 AI 응답. */
+export interface SubmissionPromptTurn {
+  role: 'user' | 'assistant';
+  /** 학생 프롬프트는 코드 첨부분을 제외한 질문만, AI 응답은 본문 텍스트. */
+  text: string;
+}
+
+/** 저장되는 제출 1건 — 채점 결과 + 식별 정보(이름/별명) + 제출 코드·프롬프트 스냅샷. */
 export interface StoredSubmission {
   /** 제출 고유 id(클라이언트 생성). */
   id: string;
@@ -28,6 +35,10 @@ export interface StoredSubmission {
   studentName: string;
   /** 공식 채점 결과(서버 /api/grade 응답). submittedAt·finalScore 포함. */
   result: ChallengeGradingResult;
+  /** 제출 시 학생이 변경한 코드(경로→내용). 구버전 기록엔 없을 수 있어 선택. */
+  submittedFiles?: ProjectFiles;
+  /** 제출 시점까지의 AI 대화(프롬프트+응답). 구버전 기록엔 없을 수 있어 선택. */
+  prompts?: SubmissionPromptTurn[];
 }
 
 interface SubmissionStoreState {

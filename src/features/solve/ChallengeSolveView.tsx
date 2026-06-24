@@ -3,8 +3,9 @@
  *
  * 좌(과제 지문) · 중(AI 도우미, 주역) · 우(워크스페이스: 에디터 + 미리보기) 3열
  * 레이아웃을 구성한다. 우측 워크스페이스는 useWorkspace로 WebContainer를 부팅해
- * 에디터 편집·AI 미러링을 모두 같은 writeFile 경로로 FS에 반영하고, Vite HMR로
- * 미리보기를 실시간 갱신한다(P1 핵심). AI가 작성한 코드펜스는 활성 파일에 미러링된다.
+ * 에디터 편집·AI 코드 반영을 모두 같은 writeFile 경로로 FS에 반영하고, Vite HMR로
+ * 미리보기를 실시간 갱신한다(P1 핵심). AI 답변의 SEARCH/REPLACE 편집은 현재 파일에서
+ * 정확히 일치하는 부분만 교체해 반영한다(handleApplyAiEdits → markdownCode.applyFileEdit).
  *
  * 제출(P3): 상단 바의 '제출'이 자동 테스트 결과 + 변경 파일 + 루브릭을 /api/grade로
  * 보내(useGradeChallenge) 공식 채점을 받고, 결과를 모달(ChallengeGradingResultPanel)로
@@ -31,9 +32,16 @@ import type {
 } from '@/shared/core/types';
 import { Button } from '@/shared/components/ui/Button';
 import { useGradeChallenge } from '@/shared/core/queries/gradeQueries';
-import { useSubmissionStore } from '@/shared/core/stores/submissionStore';
+import {
+  useSubmissionStore,
+  type SubmissionPromptTurn,
+} from '@/shared/core/stores/submissionStore';
+import { applyFileEdit, type FileEdit } from '@/shared/lib/utils/markdownCode';
 import { useWorkspace } from '@/features/solve/useWorkspace';
-import { AiChatPanel } from '@/features/solve/components/AiChatPanel';
+import {
+  AiChatPanel,
+  type EditApplyReport,
+} from '@/features/solve/components/AiChatPanel';
 import { ChallengeGradingResultPanel } from '@/features/solve/components/ChallengeGradingResultPanel';
 import { ChallengeStatementPanel } from '@/features/solve/components/ChallengeStatementPanel';
 import { WorkspaceEditorPanel } from '@/features/solve/components/WorkspaceEditorPanel';
@@ -129,14 +137,33 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     setIsAiWriting(true);
   }, []);
 
-  const handleAiCodeStream = useCallback(
-    (code: string, path: string | null) => {
-      // AI가 낸 완성 파일을 대상 파일에 반영 → FS → HMR. AI가 적은 경로(path)가 현재
-      // 파일트리에 실제로 있을 때만 그 파일에 적용하고(잘못된/환각 경로로 엉뚱한 파일을
-      // 만들지 않게), 없으면 현재 활성 파일에 적용한다. 잠금 파일이면 writeFile이 무시.
-      const targetPath =
-        path && filesRef.current[path] !== undefined ? path : activePathRef.current;
-      writeFile(targetPath, code);
+  const handleApplyAiEdits = useCallback(
+    (edits: FileEdit[]): EditApplyReport => {
+      // SEARCH/REPLACE 편집들을 현재 파일에 적용한다. 경로별로 최신 내용에 순차 적용하고
+      // (같은 파일 여러 편집 누적), SEARCH가 정확히 1곳 일치할 때만 교체된다. AI가 적은
+      // 경로가 파일트리에 실제로 있을 때만 그 파일에, 없으면 활성 파일에 적용한다.
+      let applied = 0;
+      let failed = 0;
+      const working: Record<string, string> = {};
+      for (const edit of edits) {
+        const targetPath =
+          edit.path && filesRef.current[edit.path] !== undefined
+            ? edit.path
+            : activePathRef.current;
+        const base = working[targetPath] ?? filesRef.current[targetPath] ?? '';
+        const result = applyFileEdit(base, edit.search, edit.replace);
+        if (result.ok) {
+          working[targetPath] = result.content;
+          applied += 1;
+        } else {
+          failed += 1;
+        }
+      }
+      // 파일별 최종 내용을 한 번에 반영 → FS → HMR. 잠금 파일이면 writeFile이 무시.
+      for (const [path, content] of Object.entries(working)) {
+        writeFile(path, content);
+      }
+      return { applied, failed };
     },
     [writeFile],
   );
@@ -151,6 +178,13 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     },
     [recordAiTurn],
   );
+
+  // 제출 시 기록할 AI 대화 트랜스크립트를 ref에 보관한다(스트리밍 중 자주 갱신되므로
+  // state 대신 ref로 받아 재렌더를 피한다 — 제출 시점에만 읽으면 충분).
+  const promptsRef = useRef<SubmissionPromptTurn[]>([]);
+  const handleMessagesChange = useCallback((transcript: SubmissionPromptTurn[]) => {
+    promptsRef.current = transcript;
+  }, []);
 
   // 질문에 첨부할 현재 코드 상태 — 지금 에디터에 열린 활성 파일의 경로+내용을 보낸다.
   // 전송 시점에 호출되므로 최신 버퍼를 ref로 읽어 콜백 재생성을 피한다.
@@ -187,6 +221,9 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         id: crypto.randomUUID(),
         studentName: studentName.trim() || '익명',
         result,
+        // 제출 시점의 코드(변경분)와 AI 대화를 함께 저장 → 대시보드에서 열람.
+        submittedFiles,
+        prompts: promptsRef.current,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -246,9 +283,10 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
             isDirectEditEnabled={isDirectEditEnabled}
             onToggleDirectEdit={() => setIsDirectEditEnabled((enabled) => !enabled)}
             onAiCodeStreamStart={handleAiCodeStreamStart}
-            onAiCodeStream={handleAiCodeStream}
+            onApplyAiEdits={handleApplyAiEdits}
             onAiCodeStreamEnd={handleAiCodeStreamEnd}
             getCodeContext={getCodeContext}
+            onMessagesChange={handleMessagesChange}
           />
         </AiColumn>
 

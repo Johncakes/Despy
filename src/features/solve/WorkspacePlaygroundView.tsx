@@ -6,8 +6,8 @@
  * 파일을 편집하면 FS로 동기화되어 우측 미리보기가 HMR로 즉시 갱신된다(P1 핵심).
  *
  * 'AI 미러링 (데모)' 버튼은 AI가 코드를 작성하는 경로를 모사한다 — 학생 편집과
- * 동일한 writeFile 경로를 타므로, 실제 AiChatPanel 연결 시 onAiCodeStream을
- * writeFile로 잇기만 하면 된다(구 Problem 모델 의존 제거 후 P4에서 연결).
+ * 동일한 writeFile 경로를 타므로, 실제 AiChatPanel 연결 시 AI 편집 적용
+ * (onApplyAiEdits)을 writeFile로 잇기만 하면 된다(구 Problem 모델 의존 제거 후 P4에서 연결).
  *
  * 사용처: app/playground/page.tsx
  */

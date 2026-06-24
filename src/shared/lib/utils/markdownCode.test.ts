@@ -1,62 +1,113 @@
 /**
- * markdownCode.test.ts — extractCompletedFileEdit 단위 테스트
+ * markdownCode.test.ts — SEARCH/REPLACE 편집 파싱·적용 단위 테스트
  *
- * AI 코드 반영의 핵심 안정성 로직이므로, "완성된 전체 파일만 적용"하고 부분
- * 스니펫·쉘 명령·작성 중 블록은 적용하지 않는 경계 케이스를 검증한다.
+ * AI 코드 반영의 안정성 핵심이므로, 파싱(경로 감지·완성 블록만)과 적용(정확 1곳
+ * 일치만 교체, 미일치·복수 일치 거부)의 경계 케이스를 검증한다.
  *
  * 사용처: `npm run test`
  */
 import { describe, it, expect } from 'vitest';
-import { extractCompletedFileEdit } from './markdownCode';
+import { parseSearchReplaceEdits, applyFileEdit } from './markdownCode';
 
-describe('extractCompletedFileEdit', () => {
-  it('코드 펜스가 없으면 null', () => {
-    expect(extractCompletedFileEdit('여기 설명만 있어요')).toBeNull();
+describe('parseSearchReplaceEdits', () => {
+  it('편집 블록이 없으면 빈 배열', () => {
+    expect(parseSearchReplaceEdits('그냥 설명입니다')).toEqual([]);
   });
 
-  it('완성된 전체 파일 블록(export default)을 적용 후보로 반환', () => {
-    const md =
-      '이렇게 바꾸세요:\n```jsx\nimport { useState } from "react";\nexport default function App() { return null; }\n```\n끝.';
-    const edit = extractCompletedFileEdit(md);
-    expect(edit?.content).toContain('export default function App()');
-    expect(edit?.path).toBeNull();
+  it('단일 SEARCH/REPLACE 블록을 파싱한다', () => {
+    const md = [
+      '이렇게 바꾸세요:',
+      '```edit src/App.jsx',
+      '<<<<<<< SEARCH',
+      '  const [count, setCount] = useState(0);',
+      '=======',
+      '  const [count, setCount] = useState(0);',
+      "  const parityText = count % 2 === 0 ? '짝수' : '홀수';",
+      '>>>>>>> REPLACE',
+      '```',
+    ].join('\n');
+    const edits = parseSearchReplaceEdits(md);
+    expect(edits).toHaveLength(1);
+    expect(edits[0].path).toBe('src/App.jsx');
+    expect(edits[0].search).toBe('  const [count, setCount] = useState(0);');
+    expect(edits[0].replace).toContain('parityText');
   });
 
-  it('info 줄의 파일 경로를 감지해 path로 반환', () => {
-    const md = '```jsx src/App.jsx\nexport default function App() {}\n```';
-    const edit = extractCompletedFileEdit(md);
-    expect(edit?.path).toBe('src/App.jsx');
+  it('경로 태그가 없으면 path는 null', () => {
+    const md = [
+      '```edit',
+      '<<<<<<< SEARCH',
+      'a',
+      '=======',
+      'b',
+      '>>>>>>> REPLACE',
+      '```',
+    ].join('\n');
+    expect(parseSearchReplaceEdits(md)[0].path).toBeNull();
   });
 
-  it('부분 스니펫(전체 파일 아님)은 적용하지 않음(null)', () => {
-    const md =
-      '1. 변수 추가:\n```jsx\nconst parityText = count % 2 === 0 ? "짝수" : "홀수";\n```\n2. 표시:\n```jsx\n<p>현재 값은 {parityText}</p>\n```';
-    expect(extractCompletedFileEdit(md)).toBeNull();
+  it('여러 블록을 모두 파싱한다', () => {
+    const md = [
+      '```edit src/App.jsx',
+      '<<<<<<< SEARCH',
+      'a',
+      '=======',
+      'A',
+      '>>>>>>> REPLACE',
+      '```',
+      '그리고:',
+      '```edit src/index.css',
+      '<<<<<<< SEARCH',
+      'b',
+      '=======',
+      'B',
+      '>>>>>>> REPLACE',
+      '```',
+    ].join('\n');
+    const edits = parseSearchReplaceEdits(md);
+    expect(edits).toHaveLength(2);
+    expect(edits[1].path).toBe('src/index.css');
   });
 
-  it('전체 파일 + 뒤따르는 쉘 명령이 있으면 전체 파일만 반환', () => {
-    const md =
-      '```jsx\nexport default function App() { return null; }\n```\n실행:\n```bash\nnpm run dev\n```';
-    const edit = extractCompletedFileEdit(md);
-    expect(edit?.content).toContain('export default function App()');
+  it('작성 중(닫히지 않은) 블록은 파싱하지 않는다', () => {
+    const md = ['```edit', '<<<<<<< SEARCH', 'a', '=======', 'b(작성 중…'].join('\n');
+    expect(parseSearchReplaceEdits(md)).toEqual([]);
+  });
+});
+
+describe('applyFileEdit', () => {
+  const file = 'line1\nTARGET\nline3';
+
+  it('정확히 1곳 일치하면 교체한다', () => {
+    const res = applyFileEdit(file, 'TARGET', 'CHANGED');
+    expect(res.ok).toBe(true);
+    expect(res.content).toBe('line1\nCHANGED\nline3');
   });
 
-  it('작성 중(닫히지 않은) 블록은 무시한다', () => {
-    const streaming = '작성 중:\n```jsx\nexport default function App() {';
-    expect(extractCompletedFileEdit(streaming)).toBeNull();
+  it('일치하는 곳이 없으면 거부(원본 유지)', () => {
+    const res = applyFileEdit(file, 'NOPE', 'X');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('not-found');
+    expect(res.content).toBe(file);
   });
 
-  it('경로 태그가 있으면 본문이 조각이어도 그 파일에 적용', () => {
-    const md = '```css src/index.css\n.app { color: red; }\n```';
-    const edit = extractCompletedFileEdit(md);
-    expect(edit?.path).toBe('src/index.css');
-    expect(edit?.content).toContain('.app');
+  it('여러 곳에 일치하면 모호하므로 거부(원본 유지)', () => {
+    const res = applyFileEdit('x\nx\nx', 'x', 'y');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('ambiguous');
+    expect(res.content).toBe('x\nx\nx');
   });
 
-  it('전체 파일 블록이 여러 개면 마지막(최신) 것을 반환', () => {
-    const md =
-      '```jsx\nexport default function A() {}\n```\n수정:\n```jsx\nexport default function B() {}\n```';
-    const edit = extractCompletedFileEdit(md);
-    expect(edit?.content).toContain('function B()');
+  it('빈 SEARCH는 거부한다', () => {
+    const res = applyFileEdit(file, '', 'X');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('empty');
+  });
+
+  it('여러 줄 블록도 정확 일치로 교체한다', () => {
+    const content = 'a\nfoo\nbar\nb';
+    const res = applyFileEdit(content, 'foo\nbar', 'baz');
+    expect(res.ok).toBe(true);
+    expect(res.content).toBe('a\nbaz\nb');
   });
 });

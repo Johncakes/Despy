@@ -118,37 +118,79 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
             </PlaceholderBox>
           ) : (
             <SubmissionList>
-              {sortedSubmissions.map((submission) => (
-                <SubmissionItem key={submission.id}>
-                  <SubmissionSummary>
-                    <StudentName>{submission.studentName}</StudentName>
-                    <SubmittedAt>{formatTime(submission.result.submittedAt)}</SubmittedAt>
-                    <TestMeta>
-                      테스트 {submission.result.autoTest.passedCount}/
-                      {submission.result.autoTest.totalCount}
-                    </TestMeta>
-                    <ScoreBadge>{Math.round(submission.result.finalScore)}점</ScoreBadge>
-                  </SubmissionSummary>
-                  <Detail>
-                    <DetailSummary>루브릭 항목별 점수·피드백</DetailSummary>
-                    <DetailBody>
-                      <CriterionScoreList>
-                        {submission.result.rubric.scores.map((score) => (
-                          <CriterionScoreRow key={score.criterionId}>
-                            <CriterionScoreDesc>
-                              {criterionLabel(score.criterionId)}
-                            </CriterionScoreDesc>
-                            <CriterionScoreValue>{score.score}점</CriterionScoreValue>
-                          </CriterionScoreRow>
-                        ))}
-                      </CriterionScoreList>
-                      {submission.result.rubric.feedback && (
-                        <FeedbackText>{submission.result.rubric.feedback}</FeedbackText>
-                      )}
-                    </DetailBody>
-                  </Detail>
-                </SubmissionItem>
-              ))}
+              {sortedSubmissions.map((submission) => {
+                const prompts = submission.prompts ?? [];
+                const userTurnCount = prompts.filter((turn) => turn.role === 'user').length;
+                const codeEntries = Object.entries(submission.submittedFiles ?? {});
+                return (
+                  <SubmissionItem key={submission.id}>
+                    <SubmissionSummary>
+                      <StudentName>{submission.studentName}</StudentName>
+                      <SubmittedAt>{formatTime(submission.result.submittedAt)}</SubmittedAt>
+                      <TestMeta>
+                        테스트 {submission.result.autoTest.passedCount}/
+                        {submission.result.autoTest.totalCount}
+                      </TestMeta>
+                      <ScoreBadge>{Math.round(submission.result.finalScore)}점</ScoreBadge>
+                    </SubmissionSummary>
+
+                    <Detail>
+                      <DetailSummary>루브릭 항목별 점수·피드백</DetailSummary>
+                      <DetailBody>
+                        <CriterionScoreList>
+                          {submission.result.rubric.scores.map((score) => (
+                            <CriterionScoreRow key={score.criterionId}>
+                              <CriterionScoreDesc>
+                                {criterionLabel(score.criterionId)}
+                              </CriterionScoreDesc>
+                              <CriterionScoreValue>{score.score}점</CriterionScoreValue>
+                            </CriterionScoreRow>
+                          ))}
+                        </CriterionScoreList>
+                        {submission.result.rubric.feedback && (
+                          <FeedbackText>{submission.result.rubric.feedback}</FeedbackText>
+                        )}
+                      </DetailBody>
+                    </Detail>
+
+                    <Detail>
+                      <DetailSummary>학생 프롬프트 ({userTurnCount})</DetailSummary>
+                      <DetailBody>
+                        {prompts.length === 0 ? (
+                          <MutedNote>기록된 AI 대화가 없습니다.</MutedNote>
+                        ) : (
+                          <Transcript>
+                            {prompts.map((turn, index) => (
+                              <Turn key={index} $role={turn.role}>
+                                <TurnRole $role={turn.role}>
+                                  {turn.role === 'user' ? '학생' : 'AI'}
+                                </TurnRole>
+                                <TurnText>{turn.text || '(빈 메시지)'}</TurnText>
+                              </Turn>
+                            ))}
+                          </Transcript>
+                        )}
+                      </DetailBody>
+                    </Detail>
+
+                    <Detail>
+                      <DetailSummary>제출 코드 ({codeEntries.length}개 파일)</DetailSummary>
+                      <DetailBody>
+                        {codeEntries.length === 0 ? (
+                          <MutedNote>템플릿 대비 변경된 파일이 없습니다.</MutedNote>
+                        ) : (
+                          codeEntries.map(([path, contents]) => (
+                            <CodeFile key={path}>
+                              <CodePath>{path}</CodePath>
+                              <CodeBlock>{contents}</CodeBlock>
+                            </CodeFile>
+                          ))
+                        )}
+                      </DetailBody>
+                    </Detail>
+                  </SubmissionItem>
+                );
+              })}
             </SubmissionList>
           )}
         </Panel>
@@ -445,6 +487,79 @@ const FeedbackText = styled.p`
   line-height: 1.6;
   color: ${({ theme }) => theme.colors.textMuted};
   white-space: pre-wrap;
+`;
+
+const MutedNote = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// 대화 트랜스크립트 — 학생/AI 턴을 세로로 쌓고 역할(좌측 색 바)로 구분.
+const Transcript = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const Turn = styled.div<{ $role: 'user' | 'assistant' }>`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  background: ${({ theme }) => theme.colors.surface};
+  border-left: 3px solid
+    ${({ theme, $role }) =>
+      $role === 'user' ? theme.colors.primary : theme.colors.border};
+`;
+
+const TurnRole = styled.span<{ $role: 'user' | 'assistant' }>`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme, $role }) =>
+    $role === 'user' ? theme.colors.primary : theme.colors.textMuted};
+`;
+
+const TurnText = styled.div`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.6;
+  color: ${({ theme }) => theme.colors.text};
+  white-space: pre-wrap;
+  word-break: break-word;
+`;
+
+const CodeFile = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  & + & {
+    margin-top: ${({ theme }) => theme.spacing.sm};
+  }
+`;
+
+const CodePath = styled.div`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// 제출 코드 — 모노스페이스 블록(가로/세로 스크롤, 줄바꿈 보존).
+const CodeBlock = styled.pre`
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  line-height: 1.5;
+  color: ${({ theme }) => theme.colors.text};
+  white-space: pre;
+  tab-size: 2;
 `;
 
 const Empty = styled.p`

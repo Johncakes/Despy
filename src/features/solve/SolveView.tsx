@@ -21,12 +21,16 @@ import {
 } from '@/shared/core/constants/languages';
 import { useSolveSessionStore } from '@/shared/core/stores/solveSessionStore';
 import { useGradeAlgorithm } from '@/shared/core/queries/algorithmGradeQueries';
+import { applyFileEdit, type FileEdit } from '@/shared/lib/utils/markdownCode';
 import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { ProblemPanel } from '@/features/solve/components/ProblemPanel';
 import { CodeEditorPanel } from '@/features/solve/components/CodeEditorPanel';
 import { GradingResultPanel } from '@/features/solve/components/GradingResultPanel';
-import { AiChatPanel } from '@/features/solve/components/AiChatPanel';
+import {
+  AiChatPanel,
+  type EditApplyReport,
+} from '@/features/solve/components/AiChatPanel';
 
 // ── Component ─────────────────────────────────────────────────────────────
 
@@ -60,10 +64,24 @@ export function SolveView({ problem }: { problem: Problem }) {
     setIsAiWritingCode(true);
   }, [problem.id]);
 
-  const handleAiCodeStream = useCallback(
-    // 알고리즘 풀이는 단일 코드 버퍼라 path는 무시하고 현재 코드에 반영한다.
-    (code: string, _path: string | null) => {
-      setCode(problem.id, code);
+  const handleApplyAiEdits = useCallback(
+    // 알고리즘 풀이는 단일 코드 버퍼라 path는 무시하고 현재 코드에 순차 적용한다.
+    // SEARCH가 정확히 1곳 일치할 때만 교체되고, 미일치는 거부된다(코드 보존).
+    (edits: FileEdit[]): EditApplyReport => {
+      let content = useSolveSessionStore.getState().sessions[problem.id]?.code ?? '';
+      let applied = 0;
+      let failed = 0;
+      for (const edit of edits) {
+        const result = applyFileEdit(content, edit.search, edit.replace);
+        if (result.ok) {
+          content = result.content;
+          applied += 1;
+        } else {
+          failed += 1;
+        }
+      }
+      if (applied > 0) setCode(problem.id, content);
+      return { applied, failed };
     },
     [problem.id, setCode],
   );
@@ -144,7 +162,7 @@ export function SolveView({ problem }: { problem: Problem }) {
             isDirectEditEnabled={isDirectEditEnabled}
             onToggleDirectEdit={() => setIsDirectEditEnabled((enabled) => !enabled)}
             onAiCodeStreamStart={handleAiCodeStreamStart}
-            onAiCodeStream={handleAiCodeStream}
+            onApplyAiEdits={handleApplyAiEdits}
             onAiCodeStreamEnd={handleAiCodeStreamEnd}
             getCodeContext={getCodeContext}
           />
