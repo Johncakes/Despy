@@ -6,15 +6,20 @@
  * 받아 한도를 차감한다(onTurnComplete). 한도 소진 시 입력이 비활성화된다.
  * 접힘(isOpen=false) 상태에서도 마운트를 유지해 대화 기록이 보존된다.
  *
+ * 실시간 코드 미러링: '직접 편집'이 켜져 있으면 스트리밍 답변의 마지막 코드
+ * 블록을 토큰 단위로 추출해 콜백(onAiCodeStream)으로 에디터에 흘려보낸다.
+ * 쓰기 시작 시 onAiCodeStreamStart(스냅샷), 종료 시 onAiCodeStreamEnd를 호출한다.
+ *
  * 사용처: features/solve/SolveView
  */
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import type { Problem, AgentUsageMetadata } from '@/shared/core/types';
+import { extractStreamingCodeBlock } from '@/shared/lib/utils/markdownCode';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge } from '@/shared/components/ui/Badge';
 import { QuotaMeter } from '@/shared/components/ui/QuotaMeter';
@@ -34,6 +39,15 @@ interface AiChatPanelProps {
   onToggle: () => void;
   /** 응답 1턴 완료 시 호출 (질문 +1, 토큰 누적) */
   onTurnComplete: (totalTokens: number) => void;
+  /** AI가 에디터를 직접 편집할지 여부 */
+  isDirectEditEnabled: boolean;
+  onToggleDirectEdit: () => void;
+  /** 이번 답변에서 코드 작성을 시작할 때 1회 (부모가 현재 코드 스냅샷) */
+  onAiCodeStreamStart: () => void;
+  /** 추출된 코드를 에디터로 실시간 반영 */
+  onAiCodeStream: (code: string) => void;
+  /** 스트리밍 종료 (부모가 '작성 중' 해제) */
+  onAiCodeStreamEnd: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -45,6 +59,11 @@ export function AiChatPanel({
   isOpen,
   onToggle,
   onTurnComplete,
+  isDirectEditEnabled,
+  onToggleDirectEdit,
+  onAiCodeStreamStart,
+  onAiCodeStream,
+  onAiCodeStreamEnd,
 }: AiChatPanelProps) {
   const policy = problem.aiPolicy;
   const remainingQuestions = Math.max(policy.maxQuestions - questionsUsed, 0);
@@ -60,6 +79,7 @@ export function AiChatPanel({
     onFinish: ({ message }) => {
       const usage = message.metadata as AgentUsageMetadata | undefined;
       onTurnComplete(usage?.totalTokens ?? 0);
+      onAiCodeStreamEnd();
     },
   });
 
@@ -67,6 +87,43 @@ export function AiChatPanel({
   const isBusy = status === 'submitted' || status === 'streaming';
   const isQuotaExhausted = remainingQuestions <= 0 || remainingTokens <= 0;
   const canSend = input.trim().length > 0 && !isBusy && !isQuotaExhausted;
+
+  // ── 실시간 코드 미러링 ──────────────────────────────────────────────────
+  // 마지막 assistant 메시지의 텍스트(스트리밍 중 자람)를 합쳐 코드 블록을 추출.
+  // 값이 문자열/null이라 effect 의존성은 값 비교로 동작 → useMemo 불필요.
+  let lastAssistantText: string | null = null;
+  let lastAssistantId: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role !== 'assistant') continue;
+    lastAssistantId = message.id;
+    lastAssistantText = message.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('');
+    break;
+  }
+
+  // 메시지별로 "코드 시작 스냅샷"을 1회만 찍기 위한 추적 ref
+  const snapshotMessageIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isDirectEditEnabled) return;
+    if (lastAssistantText === null || lastAssistantId === null) return;
+    const code = extractStreamingCodeBlock(lastAssistantText);
+    if (code === null) return; // 코드 블록 없음 → 에디터 건드리지 않음
+    if (snapshotMessageIdRef.current !== lastAssistantId) {
+      snapshotMessageIdRef.current = lastAssistantId;
+      onAiCodeStreamStart(); // 덮어쓰기 직전 현재 코드 스냅샷
+    }
+    onAiCodeStream(code);
+  }, [
+    isDirectEditEnabled,
+    lastAssistantText,
+    lastAssistantId,
+    onAiCodeStreamStart,
+    onAiCodeStream,
+  ]);
 
   const handleSend = () => {
     if (!canSend) return;
@@ -110,6 +167,17 @@ export function AiChatPanel({
           닫기
         </Button>
       </Header>
+
+      <Controls>
+        <DirectEditToggle>
+          <input
+            type="checkbox"
+            checked={isDirectEditEnabled}
+            onChange={onToggleDirectEdit}
+          />
+          AI 직접 편집 (코드를 에디터에 실시간 작성)
+        </DirectEditToggle>
+      </Controls>
 
       <Quota>
         <QuotaMeter label="질문 횟수" used={questionsUsed} max={policy.maxQuestions} unit="회" />
@@ -170,7 +238,7 @@ const Container = styled.aside`
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  width: 380px;
+  width: 100%;
   background: ${({ theme }) => theme.colors.surface};
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radius.md};
@@ -215,6 +283,20 @@ const HeaderTitle = styled.div`
   align-items: center;
   gap: ${({ theme }) => theme.spacing.sm};
   font-weight: ${({ theme }) => theme.font.weightBold};
+`;
+
+const Controls = styled.div`
+  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const DirectEditToggle = styled.label`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.xs};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  cursor: pointer;
 `;
 
 const Quota = styled.div`

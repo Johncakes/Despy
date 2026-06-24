@@ -13,7 +13,8 @@ AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문
 
 핵심 도메인 (MVP 구현됨):
 - **교수** (`features/author`): 문제 출제 + AI 정책 설정 (모델·질문/토큰 한도·시스템 프롬프트)
-- **학생** (`features/solve`): 문제 지문 + Monaco 에디터 + 제한된 AI 대화 + 제출·채점 결과
+- **학생** (`features/solve`): 문제 지문 + 제한된 AI 대화(주역) + Monaco 에디터 + 제출·채점 결과
+  - AI 답변의 코드 펜스를 에디터로 **실시간 미러링**(직접 편집 토글·작성 중 read-only·되돌리기)
 - **채점** (`app/api/judge`): Judge0 프록시 — `JUDGE0_URL` 없으면 모의(mock) 채점으로 폴백
 - **AI 계층** (`app/api/agent`): Gemini 프록시 — 키 은닉 + 시스템 프롬프트 주입 + 출력 토큰 한도
 
@@ -87,7 +88,7 @@ src/
     │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleProblems.ts
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
-    │   ├── utils/                logger.ts
+    │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트
     │   ├── ui/                   Button, Panel, Badge, Markdown, QuotaMeter, Field, PageShell

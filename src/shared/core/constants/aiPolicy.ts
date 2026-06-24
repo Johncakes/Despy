@@ -22,9 +22,5 @@ export const DEFAULT_AI_POLICY: AiPolicy = {
   model: 'gemini-2.5-flash',
   maxQuestions: 5,
   maxTokens: 20_000,
-  systemPrompt:
-    '너는 알고리즘 문제 풀이를 돕는 조교다. 학생이 스스로 사고하도록 유도하라. ' +
-    '완성된 정답 코드를 통째로 제공하지 말고, 알고리즘 아이디어·자료구조 선택·' +
-    '시간 복잡도 분석·반례(엣지 케이스) 위주로 힌트를 제시하라. 코드가 필요하면 ' +
-    '핵심 부분의 의사코드(pseudocode)까지만 보여줘라.',
+  systemPrompt: '너는 코딩을 돕는 AI 어시스턴트다. 질문에 성실하고 구체적으로 답하라.',
 };

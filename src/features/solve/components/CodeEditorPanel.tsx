@@ -34,6 +34,11 @@ interface CodeEditorPanelProps {
   onRunExamples: () => void;
   onSubmit: () => void;
   isGrading: boolean;
+  /** AI가 코드를 작성 중이면 에디터를 읽기 전용으로 잠근다(충돌 방지) */
+  isReadOnly?: boolean;
+  /** AI가 작성한 코드를 직전 상태로 되돌릴 수 있는지 */
+  canUndoAiCode?: boolean;
+  onUndoAiCode?: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -47,25 +52,36 @@ export function CodeEditorPanel({
   onRunExamples,
   onSubmit,
   isGrading,
+  isReadOnly = false,
+  canUndoAiCode = false,
+  onUndoAiCode,
 }: CodeEditorPanelProps) {
   const monacoLanguage = findLanguageById(languageId)?.monacoLanguage ?? 'plaintext';
 
   return (
     <Panel
       title={
-        <Select
-          value={languageId}
-          onChange={(event) => onLanguageChange(event.target.value)}
-        >
-          {allowedLanguages.map((lang) => (
-            <option key={lang.id} value={lang.id}>
-              {lang.label}
-            </option>
-          ))}
-        </Select>
+        <TitleRow>
+          <Select
+            value={languageId}
+            onChange={(event) => onLanguageChange(event.target.value)}
+          >
+            {allowedLanguages.map((lang) => (
+              <option key={lang.id} value={lang.id}>
+                {lang.label}
+              </option>
+            ))}
+          </Select>
+          {isReadOnly && <WritingTag>AI 작성 중…</WritingTag>}
+        </TitleRow>
       }
       actions={
         <>
+          {canUndoAiCode && onUndoAiCode && (
+            <Button variant="ghost" onClick={onUndoAiCode} disabled={isGrading}>
+              되돌리기
+            </Button>
+          )}
           <Button variant="ghost" onClick={onRunExamples} disabled={isGrading}>
             예제 실행
           </Button>
@@ -89,6 +105,7 @@ export function CodeEditorPanel({
             scrollBeyondLastLine: false,
             automaticLayout: true,
             tabSize: 4,
+            readOnly: isReadOnly,
           }}
         />
       </EditorHost>
@@ -97,6 +114,18 @@ export function CodeEditorPanel({
 }
 
 // ── Styled Components ─────────────────────────────────────────────────────
+
+const TitleRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const WritingTag = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.info};
+`;
 
 const EditorHost = styled.div`
   height: 100%;
