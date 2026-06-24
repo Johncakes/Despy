@@ -1,0 +1,79 @@
+/**
+ * requestValidation.test.ts — 채점 요청 검증 단위 테스트
+ *
+ * 신뢰 경계의 핵심이므로, 필수 필드 누락·weights 합 오류·비객체 입력 등
+ * 잘못된 페이로드를 차단하고 정상 요청은 통과시키는지 검증한다.
+ *
+ * 사용처: `npm run test`
+ */
+import { describe, it, expect } from 'vitest';
+import { validateGradeRequest } from './requestValidation';
+import type { ChallengeGradingRequest } from '@/shared/core/types';
+
+const validRequest: ChallengeGradingRequest = {
+  problemId: 'cart-delete',
+  statement: '장바구니 삭제 기능',
+  rubric: {
+    criteria: [{ id: 'c1', description: '삭제', maxScore: 10 }],
+    weights: { tests: 0.6, rubric: 0.4 },
+  },
+  submittedFiles: { 'src/Cart.jsx': '...' },
+  autoTest: { passedCount: 1, totalCount: 2, cases: [] },
+};
+
+describe('validateGradeRequest', () => {
+  it('정상 요청은 null(통과)', () => {
+    expect(validateGradeRequest(validRequest)).toBeNull();
+  });
+
+  it('객체가 아닌 입력을 차단한다', () => {
+    expect(validateGradeRequest(null)).not.toBeNull();
+    expect(validateGradeRequest('문자열')).not.toBeNull();
+    expect(validateGradeRequest(42)).not.toBeNull();
+  });
+
+  it('problemId 누락을 차단한다', () => {
+    expect(validateGradeRequest({ ...validRequest, problemId: '' })).toMatch(
+      /problemId/,
+    );
+  });
+
+  it('rubric.criteria 누락을 차단한다', () => {
+    const { rubric: _omit, ...rest } = validRequest;
+    expect(validateGradeRequest(rest)).toMatch(/criteria/);
+  });
+
+  it('submittedFiles 누락을 차단한다', () => {
+    const { submittedFiles: _omit, ...rest } = validRequest;
+    expect(validateGradeRequest(rest)).toMatch(/submittedFiles/);
+  });
+
+  it('autoTest 누락을 차단한다', () => {
+    const { autoTest: _omit, ...rest } = validRequest;
+    expect(validateGradeRequest(rest)).toMatch(/autoTest/);
+  });
+
+  it('weights 누락을 차단한다', () => {
+    const broken = {
+      ...validRequest,
+      rubric: { ...validRequest.rubric, weights: undefined },
+    };
+    expect(validateGradeRequest(broken)).toMatch(/weights/);
+  });
+
+  it('weights 합이 1.0이 아니면 차단한다 (finalScore 왜곡 방지)', () => {
+    const broken = {
+      ...validRequest,
+      rubric: { ...validRequest.rubric, weights: { tests: 0.6, rubric: 0.3 } },
+    };
+    expect(validateGradeRequest(broken)).toMatch(/1\.0/);
+  });
+
+  it('부동소수 오차(0.7+0.3) 범위는 허용한다', () => {
+    const ok = {
+      ...validRequest,
+      rubric: { ...validRequest.rubric, weights: { tests: 0.7, rubric: 0.3 } },
+    };
+    expect(validateGradeRequest(ok)).toBeNull();
+  });
+});

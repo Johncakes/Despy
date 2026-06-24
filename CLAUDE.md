@@ -78,7 +78,8 @@ src/
 │   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
 │   └── api/                      유일한 백엔드 (키 은닉·프록시)
 │       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage)
-│       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백)
+│       ├── grade/route.ts        공식 채점 (AI 루브릭 정성 채점 + 가중합, 피벗 P3)
+│       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백, 구 — P5 제거 예정)
 │
 ├── features/                     도메인별 기능 모듈 (세로 슬라이스)
 │   ├── author/                   교수: AuthorView, ProblemForm, TestCaseEditor,
@@ -91,15 +92,16 @@ src/
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
-    │   ├── api/                  judgeApi.ts (채점 fetch 격리)
+    │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · judgeApi.ts (구 채점 fetch, P5 제거)
     │   ├── stores/               challengeStore.ts(피벗), problemStore.ts(구), solveSessionStore.ts (Zustand persist)
-    │   ├── queries/              judgeQueries.ts (채점 mutation, 구), queryKeys.ts
-    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingResult·ProjectFiles·AiPolicy / 구 Problem 계열)
+    │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), judgeQueries.ts (구, P5 제거), queryKeys.ts
+    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 구 Problem 계열)
     │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(구),
     │                             webcontainerTemplates.ts (샘플 Vite+React 트리)
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
-    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn) · fileSync.ts (편집→FS debounce 동기화)
+    │   ├── grader/               grader.ts(인터페이스) · geminiGrader.ts(구현) · score.ts(정규화·가중합) · requestValidation.ts(요청 검증) · index.ts(교체점)
+    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트

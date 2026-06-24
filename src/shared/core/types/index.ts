@@ -127,6 +127,31 @@ export interface ChallengeGradingResult {
   submittedAt: number;
 }
 
+/**
+ * 과제 채점 요청 페이로드 (클라이언트 → /api/grade).
+ *
+ * 학생 제출 파일·루브릭과 풀이 중 본 자동테스트 결과(참고 신호)를 묶는다.
+ * 공식 점수는 서버가 루브릭 정성 채점 + 가중합으로 확정한다(docs/spec-webcontainer.md §7.2).
+ * autoTest는 *즉시 피드백*일 뿐이며 점수 무결성은 서버가 책임진다.
+ */
+export interface ChallengeGradingRequest {
+  problemId: string;
+  /** 과제 요구사항 마크다운 (채점 맥락) */
+  statement: string;
+  /** 채점 기준(항목·만점·가중치) */
+  rubric: GradingRubric;
+  /** 학생이 제출한(변경한) 파일 — 경로→내용 평면 맵 */
+  submittedFiles: ProjectFiles;
+  /** 선택: 템플릿 대비 변경 diff */
+  diff?: string;
+  /** WebContainer 자동 테스트 결과 (참고 신호) */
+  autoTest: AutoTestResult;
+  /** 채점 모델 id (미지정 시 서버 기본값) */
+  model?: string;
+  /** 채점 가드레일 시스템 프롬프트 (교수 설정) */
+  systemPrompt?: string;
+}
+
 // ── 언어 ────────────────────────────────────────────────────────────────
 
 /**

@@ -97,6 +97,10 @@ export function WorkspacePlaygroundView() {
             previewUrl={workspace.previewUrl}
             errorMessage={workspace.errorMessage}
             onRetry={workspace.retry}
+            testResult={workspace.testResult}
+            isRunningTests={workspace.isRunningTests}
+            testErrorMessage={workspace.testErrorMessage}
+            onRunTests={() => void workspace.runTests()}
           />
         </PreviewColumn>
       </Body>

@@ -17,7 +17,7 @@
  * 사용처: features/solve/WorkspacePlaygroundView (P0/P1 PoC), 이후 SolveView 워크스페이스
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ProjectFiles } from '@/shared/core/types';
+import type { AutoTestResult, ProjectFiles } from '@/shared/core/types';
 import {
   bootWebContainer,
   mountProjectFiles,
@@ -25,6 +25,7 @@ import {
   startDevServer,
 } from '@/shared/lib/webcontainer/runtime';
 import { createFileSync, type FileSync } from '@/shared/lib/webcontainer/fileSync';
+import { runTests as runTestSuite } from '@/shared/lib/webcontainer/testRunner';
 import { logger } from '@/shared/lib/utils/logger';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -66,6 +67,19 @@ export interface UseWorkspaceResult {
   writeFile: (path: string, contents: string) => void;
   /** 해당 경로가 잠겨 있는지 */
   isPathLocked: (path: string) => boolean;
+
+  // ── 자동 테스트 (P2) ──
+  /**
+   * WebContainer 안에서 `npm test`(Vitest)를 실행하고 결과를 캡처한다.
+   * 풀이 중 즉시 피드백용이며 공식 점수가 아니다(§7.2). 결과는 testResult로도 노출된다.
+   */
+  runTests: () => Promise<AutoTestResult>;
+  /** 마지막 테스트 실행 결과(미실행이면 null) */
+  testResult: AutoTestResult | null;
+  /** 테스트 실행 중 여부 */
+  isRunningTests: boolean;
+  /** 테스트 실행 실패 메시지(타임아웃·결과 파일 부재 등, 정상 실행이면 null) */
+  testErrorMessage: string | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -103,6 +117,12 @@ export function useWorkspace(
     pickDefaultActivePath(template, lockedPaths),
   );
 
+  // 자동 테스트(P2) 상태. 중복 실행은 ref로 가드한다(동시 spawn 방지).
+  const [testResult, setTestResult] = useState<AutoTestResult | null>(null);
+  const [isRunningTests, setIsRunningTests] = useState(false);
+  const [testErrorMessage, setTestErrorMessage] = useState<string | null>(null);
+  const isRunningTestsRef = useRef(false);
+
   const lockedSet = useMemo(() => new Set(lockedPaths), [lockedPaths]);
   const isPathLocked = useCallback((path: string) => lockedSet.has(path), [lockedSet]);
 
@@ -118,6 +138,33 @@ export function useWorkspace(
     },
     [lockedSet],
   );
+
+  const runTests = useCallback(async (): Promise<AutoTestResult> => {
+    if (isRunningTestsRef.current) {
+      throw new Error('테스트가 이미 실행 중입니다.');
+    }
+    isRunningTestsRef.current = true;
+    setIsRunningTests(true);
+    setTestErrorMessage(null);
+    appendLog('[despy] npm test 실행 중…\n');
+
+    try {
+      // P2 PoC/샘플 과제는 'npm test'(Vitest)로 고정. P4에서 challenge.testCommand로 일반화.
+      const result = await runTestSuite('npm', ['test'], appendLog);
+      setTestResult(result);
+      appendLog(`[despy] 테스트 완료 — ${result.passedCount}/${result.totalCount} 통과\n`);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTestErrorMessage(message);
+      appendLog(`[despy] 테스트 실패: ${message}\n`);
+      logger.error('[useWorkspace] 테스트 실행 실패', error);
+      throw error;
+    } finally {
+      isRunningTestsRef.current = false;
+      setIsRunningTests(false);
+    }
+  }, [appendLog]);
 
   const start = useCallback(async () => {
     try {
@@ -179,5 +226,9 @@ export function useWorkspace(
     setActivePath,
     writeFile,
     isPathLocked,
+    runTests,
+    testResult,
+    isRunningTests,
+    testErrorMessage,
   };
 }

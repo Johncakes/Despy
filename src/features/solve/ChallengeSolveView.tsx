@@ -6,8 +6,12 @@
  * 에디터 편집·AI 미러링을 모두 같은 writeFile 경로로 FS에 반영하고, Vite HMR로
  * 미리보기를 실시간 갱신한다(P1 핵심). AI가 작성한 코드펜스는 활성 파일에 미러링된다.
  *
+ * 제출(P3): 상단 바의 '제출'이 자동 테스트 결과 + 변경 파일 + 루브릭을 /api/grade로
+ * 보내(useGradeChallenge) 공식 채점을 받고, 결과를 모달(ChallengeGradingResultPanel)로
+ * 보여준다. testResult가 없으면 제출 전에 runTests()를 먼저 돌려 자동 테스트 신호를 채운다.
+ *
  * ⚠️ AI 사용량(질문/토큰)은 P1에서 in-memory 상태로 추적한다(새로고침 시 초기화).
- *    영속(despy-workspace)·제출/채점은 P2~P4에서 도입한다(docs/spec-webcontainer.md).
+ *    파일 버퍼 영속(despy-workspace)은 P4에서 도입한다(docs/spec-webcontainer.md).
  *
  * 사용처: app/workspace/[challengeId]/page.tsx
  */
@@ -16,20 +20,47 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import styled, { css } from 'styled-components';
-import type { ChallengeProblem } from '@/shared/core/types';
-import { Badge } from '@/shared/components/ui/Badge';
+import type {
+  ChallengeGradingResult,
+  ChallengeProblem,
+  ProjectFiles,
+} from '@/shared/core/types';
 import { Button } from '@/shared/components/ui/Button';
+import { useGradeChallenge } from '@/shared/core/queries/gradeQueries';
 import { useWorkspace } from '@/features/solve/useWorkspace';
 import { AiChatPanel } from '@/features/solve/components/AiChatPanel';
+import { ChallengeGradingResultPanel } from '@/features/solve/components/ChallengeGradingResultPanel';
 import { ChallengeStatementPanel } from '@/features/solve/components/ChallengeStatementPanel';
 import { WorkspaceEditorPanel } from '@/features/solve/components/WorkspaceEditorPanel';
 import { WorkspacePanel } from '@/features/solve/components/WorkspacePanel';
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * 채점에 보낼 제출 파일(변경 파일만)을 모은다 — 템플릿 대비 내용이 바뀐(또는 새로
+ * 추가된) 편집 가능 파일만 남긴다. 잠금 파일·미변경 파일은 제외해 채점 프롬프트의
+ * 토큰·노이즈를 줄이고 채점관이 학생 기여에 집중하게 한다(docs §7.2).
+ */
+function collectChangedFiles(
+  files: ProjectFiles,
+  template: ProjectFiles,
+  lockedPaths: readonly string[],
+): ProjectFiles {
+  const locked = new Set(lockedPaths);
+  const changed: ProjectFiles = {};
+  for (const [path, contents] of Object.entries(files)) {
+    if (locked.has(path)) continue;
+    if (contents !== template[path]) changed[path] = contents;
+  }
+  return changed;
+}
 
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem }) {
   const workspace = useWorkspace(challenge.template, challenge.lockedPaths);
-  const { writeFile, activePath } = workspace;
+  const { writeFile, activePath, files, testResult, runTests } = workspace;
+  const grade = useGradeChallenge();
 
   // AI 사용량(P1 in-memory) · 패널 토글 상태
   const [questionsUsed, setQuestionsUsed] = useState(0);
@@ -37,6 +68,10 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   const [isAiOpen, setIsAiOpen] = useState(true);
   const [isDirectEditEnabled, setIsDirectEditEnabled] = useState(true);
   const [isAiWriting, setIsAiWriting] = useState(false);
+
+  // 제출/채점(P3) 상태 — 결과 모달과 제출 에러.
+  const [gradingResult, setGradingResult] = useState<ChallengeGradingResult | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // 미러링 콜백을 안정화(useCallback)해 AiChatPanel의 미러링 effect가 매 렌더
   // 재실행되지 않게 한다. 활성 파일 경로는 ref로 읽어 콜백을 재생성하지 않는다.
@@ -67,17 +102,58 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     setTokensUsed((total) => total + totalTokens);
   }, []);
 
+  const handleSubmit = useCallback(async () => {
+    setSubmitError(null);
+    try {
+      // autoTest는 채점의 필수 신호다 — 아직 안 돌렸으면 제출 전에 한 번 실행한다(§7.2).
+      // runTests가 실패하면(타임아웃 등) throw되어 아래 catch에서 제출을 중단한다.
+      const autoTest = testResult ?? (await runTests());
+      const submittedFiles = collectChangedFiles(
+        files,
+        challenge.template,
+        challenge.lockedPaths,
+      );
+      const result = await grade.mutateAsync({
+        problemId: challenge.id,
+        statement: challenge.statement,
+        rubric: challenge.rubric,
+        submittedFiles,
+        autoTest,
+        // 모델은 과제 AI 정책을 따르되, aiPolicy.systemPrompt(답변 가드레일)는 채점
+        // 가드레일이 아니므로 보내지 않는다 — grader의 기본 채점 프롬프트를 쓴다.
+        model: challenge.aiPolicy.model,
+      });
+      setGradingResult(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSubmitError(message);
+    }
+  }, [testResult, runTests, files, challenge, grade]);
+
+  // 워크스페이스가 준비되어야(테스트 실행 가능) 제출할 수 있다.
+  const isSubmitting = grade.isPending;
+  const canSubmit =
+    workspace.phase === 'ready' && !isSubmitting && !workspace.isRunningTests;
+  const submitLabel = isSubmitting
+    ? '채점 중…'
+    : workspace.isRunningTests
+      ? '테스트 실행 중…'
+      : '제출';
+
   return (
     <Wrapper>
       <TopBar>
         <BackLink href="/">← 목록</BackLink>
         <Title>{challenge.title}</Title>
-        <Badge tone="neutral">제출·채점은 P2~ 예정</Badge>
+        {submitError && <ErrorText title={submitError}>{submitError}</ErrorText>}
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
             AI 도우미 열기
           </Button>
         )}
+        <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
+          {submitLabel}
+        </Button>
       </TopBar>
 
       <Body>
@@ -124,10 +200,22 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               previewUrl={workspace.previewUrl}
               errorMessage={workspace.errorMessage}
               onRetry={workspace.retry}
+              testResult={workspace.testResult}
+              isRunningTests={workspace.isRunningTests}
+              testErrorMessage={workspace.testErrorMessage}
+              onRunTests={() => void workspace.runTests()}
             />
           </PreviewArea>
         </WorkspaceColumn>
       </Body>
+
+      {gradingResult && (
+        <ChallengeGradingResultPanel
+          result={gradingResult}
+          criteria={challenge.rubric.criteria}
+          onClose={() => setGradingResult(null)}
+        />
+      )}
     </Wrapper>
   );
 }
@@ -157,6 +245,16 @@ const Title = styled.h1`
   flex: 1;
   margin: 0;
   font-size: ${({ theme }) => theme.font.sizeLg};
+`;
+
+// 제출 실패 메시지 — 길면 줄임표로 잘라 상단 바 레이아웃을 깨지 않는다(전문은 title 속성).
+const ErrorText = styled.span`
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.danger};
 `;
 
 const Body = styled.div`
