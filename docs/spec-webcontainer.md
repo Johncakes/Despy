@@ -455,7 +455,7 @@ feature가 훅으로 감싼다. `shared → features` 금지 유지.
 | 단계 | 목표 | 완료 기준 |
 |---|---|---|
 | **P0 PoC** ✅ | WebContainer가 브라우저에서 부팅·미리보기 되는지 | **완료(2026-06-24)** — COOP/COEP 헤더 적용 → boot→mount→`npm install`→`npm run dev`→iframe 미리보기 성공(`/playground`). headless Chrome로 자동 검증(crossOriginIsolated=true, ~20초). |
-| **P1 워크스페이스** ✅ | Monaco ↔ FS 동기화 + AI 미러링 경로 | **완료(2026-06-24)** — 2-pane(파일트리+Monaco ↔ 미리보기), 편집/AI 데모 모두 동일 `writeFile`(debounce)→FS→`[vite] hmr update` 실측. 잠금 파일 read-only. 실제 AiChatPanel 연결·persist(`despy-workspace`)는 P4로. |
+| **P1 워크스페이스** ✅ | Monaco ↔ FS 동기화 + AI 미러링 경로 | **완료(2026-06-24)** — `/playground` 2-pane(편집→`writeFile` debounce→FS→`[vite] hmr update` 실측) + `/workspace/[id]` 3열 `ChallengeSolveView`(지문·AiChatPanel·워크스페이스). 실제 AiChatPanel 코드펜스 미러링을 활성 파일 `writeFile`에 연결, AI 작성 중 에디터 read-only. `ChallengeProblem` 모델·`challengeStore`(`despy-challenges`)·샘플 과제 기반. 파일 버퍼 persist(`despy-workspace`, IndexedDB+delta)는 P4로. |
 | **P2 자동 채점** | WebContainer 내 `npm test` 결과 캡처 | `AutoTestResult` 파싱·표시 |
 | **P3 AI 루브릭 채점** | `/api/grade` + 가중합 | `ChallengeGradingResult` 최종 점수 |
 | **P4 출제 도구** | `ChallengeAuthorView`(템플릿·잠금·테스트·루브릭) | 교수가 과제 1개 풀 출제 |

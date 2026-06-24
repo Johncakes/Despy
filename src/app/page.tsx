@@ -11,6 +11,7 @@
 
 import Link from 'next/link';
 import styled from 'styled-components';
+import { useChallengeStore } from '@/shared/core/stores/challengeStore';
 import { useProblemStore } from '@/shared/core/stores/problemStore';
 import { useHasMounted } from '@/shared/lib/hooks/useHasMounted';
 import { Button } from '@/shared/components/ui/Button';
@@ -18,6 +19,7 @@ import { Panel } from '@/shared/components/ui/Panel';
 
 export default function HomePage() {
   const hasMounted = useHasMounted();
+  const challenges = useChallengeStore((state) => state.challenges);
   const problems = useProblemStore((state) => state.problems);
 
   return (
@@ -36,7 +38,27 @@ export default function HomePage() {
       </Header>
 
       <ListWrap>
-        <Panel title="문제 목록 (학생 풀이)">
+        <Panel title="과제 목록 (워크스페이스 — 실시간 바이브코딩)">
+          <List>
+            {!hasMounted && <Empty>불러오는 중…</Empty>}
+            {hasMounted &&
+              challenges.map((challenge) => (
+                <Row key={challenge.id}>
+                  <RowTitle>{challenge.title || '(제목 없음)'}</RowTitle>
+                  <Link href={`/workspace/${challenge.id}`}>
+                    <Button variant="primary">풀기 →</Button>
+                  </Link>
+                </Row>
+              ))}
+            {hasMounted && challenges.length === 0 && (
+              <Empty>출제된 과제가 없습니다.</Empty>
+            )}
+          </List>
+        </Panel>
+      </ListWrap>
+
+      <ListWrap>
+        <Panel title="(구) 알고리즘 문제 — Judge0 (P5에서 정리 예정)">
           <List>
             {!hasMounted && <Empty>불러오는 중…</Empty>}
             {hasMounted &&

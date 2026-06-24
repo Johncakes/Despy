@@ -35,6 +35,14 @@ export interface DevServerInfo {
   url: string;
 }
 
+/** 타임아웃 가드가 붙은 명령 실행 결과 */
+export interface CommandResult {
+  /** 프로세스 종료 코드 (timedOut=true면 kill에 의한 값이라 신뢰 불가) */
+  exitCode: number;
+  /** 타임아웃으로 강제 종료(kill)되었으면 true */
+  timedOut: boolean;
+}
+
 // ── 싱글턴 상태 ──────────────────────────────────────────────────────────────
 
 /** 부팅된 WebContainer 인스턴스(탭당 1개). 미부팅이면 null. */
@@ -87,6 +95,34 @@ export async function runCommand(
   const process = await container.spawn(command, args);
   pipeOutput(process, onOutput);
   return process.exit;
+}
+
+/**
+ * 명령을 실행하되 timeoutMs 안에 끝나지 않으면 kill하고 결과에 timedOut=true를 담는다.
+ * 학생/AI 코드에 무한 루프·무한 빌드가 섞여 탭이 멈추는 것을 막는 프로세스 가드다
+ * (특히 test 실행 — docs/spec-webcontainer.md §3.4). 출력은 onOutput으로 스트리밍한다.
+ */
+export async function runCommandWithTimeout(
+  command: string,
+  args: string[],
+  options: { onOutput?: OutputListener; timeoutMs: number },
+): Promise<CommandResult> {
+  const container = await bootWebContainer();
+  const process = await container.spawn(command, args);
+  pipeOutput(process, options.onOutput);
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    process.kill();
+  }, options.timeoutMs);
+
+  try {
+    const exitCode = await process.exit;
+    return { exitCode, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

@@ -71,10 +71,11 @@ npm run test         # vitest 실행
 ```
 src/
 ├── app/                          Next.js App Router (라우팅만 — 로직 없음)
-│   ├── page.tsx                  홈 (역할 진입 + 문제 목록)
+│   ├── page.tsx                  홈 (역할 진입 + 과제/구 문제 목록)
 │   ├── author/page.tsx           교수 출제 화면 진입점
-│   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점
-│   ├── playground/page.tsx       WebContainer P0 PoC 진입점 (신규 — spec-webcontainer.md)
+│   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (구 알고리즘 — P5 정리 예정)
+│   ├── workspace/[challengeId]/page.tsx 학생 과제 풀이(워크스페이스) 진입점 (피벗 P1)
+│   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
 │   └── api/                      유일한 백엔드 (키 은닉·프록시)
 │       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage)
 │       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백)
@@ -82,19 +83,20 @@ src/
 ├── features/                     도메인별 기능 모듈 (세로 슬라이스)
 │   ├── author/                   교수: AuthorView, ProblemForm, TestCaseEditor,
 │   │                             AiPolicyFields, useProblemDraft
-│   └── solve/                    학생: SolveView, ProblemPanel, CodeEditorPanel,
-│                                 AiChatPanel, GradingResultPanel
-│                                 + (피벗) WorkspacePlaygroundView, useWorkspace, components/
-│                                   WorkspacePanel·WorkspaceEditorPanel·FileTree (WebContainer 워크스페이스)
+│   └── solve/                    학생(구 알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
+│                                 GradingResultPanel
+│                                 + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
+│                                   AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
+│                                   WorkspacePanel·WorkspaceEditorPanel·FileTree·WorkspacePlaygroundView
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
     │   ├── api/                  judgeApi.ts (채점 fetch 격리)
-    │   ├── stores/               problemStore.ts, solveSessionStore.ts (Zustand persist)
-    │   ├── queries/              judgeQueries.ts (채점 mutation), queryKeys.ts
-    │   ├── types/                index.ts (Problem, AiPolicy, TestCase, GradingResult, ProjectFiles …)
-    │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleProblems.ts,
-    │                             webcontainerTemplates.ts (P0 신규 — 샘플 Vite+React 트리)
+    │   ├── stores/               challengeStore.ts(피벗), problemStore.ts(구), solveSessionStore.ts (Zustand persist)
+    │   ├── queries/              judgeQueries.ts (채점 mutation, 구), queryKeys.ts
+    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingResult·ProjectFiles·AiPolicy / 구 Problem 계열)
+    │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(구),
+    │                             webcontainerTemplates.ts (샘플 Vite+React 트리)
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
     │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn) · fileSync.ts (편집→FS debounce 동기화)
@@ -156,11 +158,11 @@ interface ListProps {
 - 서버 데이터: 채점은 **mutation**(`useGradeSubmission`, `shared/core/queries/judgeQueries.ts`).
   단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `problemStore`(문제/AI정책 CRUD), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `problemStore`(구 알고리즘 문제, P5 제거 예정), `solveSessionStore`(문제별 코드·언어·AI 사용량).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `problemStore → 'despy-problems'` (v1), `solveSessionStore → 'despy-solve-session'` (v1)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `problemStore → 'despy-problems'` (v1, 구), `solveSessionStore → 'despy-solve-session'` (v1)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지)
 

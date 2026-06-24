@@ -8,7 +8,7 @@
  * Monaco는 window 의존이라 next/dynamic(ssr:false)로 클라이언트에서만 로드한다.
  * 파일마다 별도 모델을 유지하도록 `path` prop을 넘겨 되돌리기 히스토리를 보존한다.
  *
- * 사용처: features/solve/WorkspacePlaygroundView (P1), 이후 SolveView
+ * 사용처: features/solve/WorkspacePlaygroundView (PoC), features/solve/ChallengeSolveView (P1)
  */
 'use client';
 
@@ -48,6 +48,8 @@ interface WorkspaceEditorPanelProps {
   onSelectFile: (path: string) => void;
   /** 활성 파일 내용 변경 (상위가 버퍼+FS 동기화) */
   onEditActiveFile: (contents: string) => void;
+  /** AI가 코드를 실시간 작성하는 중이면 에디터를 read-only로 잠가 충돌을 막는다 */
+  isAiWriting?: boolean;
   /** 헤더 우측 액션(예: AI 미러링 데모 버튼) */
   actions?: React.ReactNode;
 }
@@ -67,9 +69,11 @@ export function WorkspaceEditorPanel({
   lockedPaths,
   onSelectFile,
   onEditActiveFile,
+  isAiWriting = false,
   actions,
 }: WorkspaceEditorPanelProps) {
   const isActiveLocked = lockedPaths.includes(activePath);
+  const isReadOnly = isActiveLocked || isAiWriting;
 
   return (
     <Panel
@@ -77,6 +81,7 @@ export function WorkspaceEditorPanel({
         <TitleRow>
           <span>에디터</span>
           {isActiveLocked && <Badge tone="warning">잠금 · 읽기 전용</Badge>}
+          {isAiWriting && !isActiveLocked && <Badge tone="info">AI 작성 중…</Badge>}
         </TitleRow>
       }
       actions={actions}
@@ -105,7 +110,7 @@ export function WorkspaceEditorPanel({
               scrollBeyondLastLine: false,
               automaticLayout: true,
               tabSize: 2,
-              readOnly: isActiveLocked,
+              readOnly: isReadOnly,
             }}
           />
         </EditorHost>

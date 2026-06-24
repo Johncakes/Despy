@@ -130,7 +130,7 @@ export function SolveView({ problem }: { problem: Problem }) {
 
         <AiColumn $isOpen={isAiOpen}>
           <AiChatPanel
-            problem={problem}
+            aiPolicy={problem.aiPolicy}
             questionsUsed={session.questionsUsed}
             tokensUsed={session.tokensUsed}
             isOpen={isAiOpen}

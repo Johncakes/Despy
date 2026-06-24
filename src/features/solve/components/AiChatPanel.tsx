@@ -10,7 +10,10 @@
  * 블록을 토큰 단위로 추출해 콜백(onAiCodeStream)으로 에디터에 흘려보낸다.
  * 쓰기 시작 시 onAiCodeStreamStart(스냅샷), 종료 시 onAiCodeStreamEnd를 호출한다.
  *
- * 사용처: features/solve/SolveView
+ * AI 정책만 의존하므로 prop으로 `aiPolicy`만 받는다(구 Problem·신 ChallengeProblem
+ * 양쪽에서 재사용 — 특정 문제 모델에 결합하지 않는다).
+ *
+ * 사용처: features/solve/SolveView(구), features/solve/ChallengeSolveView(피벗)
  */
 'use client';
 
@@ -18,7 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import type { Problem, AgentUsageMetadata } from '@/shared/core/types';
+import type { AiPolicy, AgentUsageMetadata } from '@/shared/core/types';
 import { extractStreamingCodeBlock } from '@/shared/lib/utils/markdownCode';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -32,7 +35,8 @@ const MAX_OUTPUT_TOKENS_CAP = 2048;
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface AiChatPanelProps {
-  problem: Problem;
+  /** 교수가 설정한 AI 가드레일(모델·질문/토큰 한도·시스템 프롬프트) */
+  aiPolicy: AiPolicy;
   questionsUsed: number;
   tokensUsed: number;
   isOpen: boolean;
@@ -53,7 +57,7 @@ interface AiChatPanelProps {
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function AiChatPanel({
-  problem,
+  aiPolicy,
   questionsUsed,
   tokensUsed,
   isOpen,
@@ -65,7 +69,7 @@ export function AiChatPanel({
   onAiCodeStream,
   onAiCodeStreamEnd,
 }: AiChatPanelProps) {
-  const policy = problem.aiPolicy;
+  const policy = aiPolicy;
   const remainingQuestions = Math.max(policy.maxQuestions - questionsUsed, 0);
   const remainingTokens = Math.max(policy.maxTokens - tokensUsed, 0);
 
