@@ -66,8 +66,7 @@ interface AiChatPanelProps {
   aiPolicy: AiPolicy;
   questionsUsed: number;
   tokensUsed: number;
-  isOpen: boolean;
-  onToggle: () => void;
+
   /** 응답 1턴 완료 시 호출 (질문 +1, 토큰 누적) */
   onTurnComplete: (totalTokens: number) => void;
   /** AI가 에디터를 직접 편집할지 여부 */
@@ -131,8 +130,7 @@ export function AiChatPanel({
   aiPolicy,
   questionsUsed,
   tokensUsed,
-  isOpen,
-  onToggle,
+
   onTurnComplete,
   isDirectEditEnabled,
   onToggleDirectEdit,
@@ -234,14 +232,6 @@ export function AiChatPanel({
     }
   };
 
-  if (!isOpen) {
-    return (
-      <CollapsedBar type="button" onClick={onToggle} aria-label="AI 에이전트 열기">
-        <CollapsedText>AI 에이전트</CollapsedText>
-      </CollapsedBar>
-    );
-  }
-
   return (
     <Container>
       <Header>
@@ -249,9 +239,6 @@ export function AiChatPanel({
           AI 에이전트
           <Badge tone="info">{policy.model}</Badge>
         </HeaderTitle>
-        <Button variant="ghost" onClick={onToggle}>
-          닫기
-        </Button>
       </Header>
 
       <Controls>
@@ -351,29 +338,7 @@ const Container = styled.aside`
   overflow: hidden;
 `;
 
-const CollapsedBar = styled.button`
-  width: 44px;
-  height: 100%;
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.md};
-  color: ${({ theme }) => theme.colors.text};
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 
-  &:hover {
-    background: ${({ theme }) => theme.colors.surfaceAlt};
-  }
-`;
-
-const CollapsedText = styled.span`
-  writing-mode: vertical-rl;
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  letter-spacing: 2px;
-`;
 
 const Header = styled.header`
   display: flex;

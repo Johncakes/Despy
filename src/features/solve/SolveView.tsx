@@ -50,7 +50,7 @@ export function SolveView({ problem }: { problem: Problem }) {
 
   const saveResult = useSolveHistoryStore((state) => state.saveResult);
 
-  const [isAiOpen, setIsAiOpen] = useState(true);
+  const [isStatementOpen, setIsStatementOpen] = useState(true);
   const gradeMutation = useGradeAlgorithm();
 
   // 채점 완료 시 마이페이지 이력용으로 결과를 영속 저장한다.
@@ -149,25 +149,27 @@ export function SolveView({ problem }: { problem: Problem }) {
       <TopBar>
         <BackLink href="/">← 목록</BackLink>
         <Title>{problem.title}</Title>
-        {!isAiOpen && (
-          <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
-            AI 에이전트 열기
+        {!isStatementOpen && (
+          <Button variant="ghost" onClick={() => setIsStatementOpen(true)}>
+            요구사항 열기
           </Button>
         )}
       </TopBar>
 
       <Body>
-        <ProblemColumn>
-          <ProblemPanel problem={problem} />
+        <ProblemColumn $isOpen={isStatementOpen}>
+          <ProblemPanel 
+            problem={problem} 
+            isOpen={isStatementOpen}
+            onToggle={() => setIsStatementOpen((open) => !open)}
+          />
         </ProblemColumn>
 
-        <AiColumn $isOpen={isAiOpen}>
+        <AiColumn>
           <AiChatPanel
             aiPolicy={problem.aiPolicy}
             questionsUsed={session.questionsUsed}
             tokensUsed={session.tokensUsed}
-            isOpen={isAiOpen}
-            onToggle={() => setIsAiOpen((open) => !open)}
             onTurnComplete={(totalTokens) => recordAiTurn(problem.id, totalTokens)}
             isDirectEditEnabled={isDirectEditEnabled}
             onToggleDirectEdit={() => setIsDirectEditEnabled((enabled) => !enabled)}
@@ -250,25 +252,26 @@ const Body = styled.div`
   gap: ${({ theme }) => theme.spacing.sm};
 `;
 
-const ProblemColumn = styled.div`
-  width: 320px;
-  min-height: 0;
-  flex-shrink: 0;
-`;
-
-// AI 채팅은 가운데 주역 — 열려 있으면 넓게 차지하고, 접으면 얇은 바(44px)로 축소.
-const AiColumn = styled.div<{ $isOpen: boolean }>`
+const ProblemColumn = styled.div<{ $isOpen: boolean }>`
   min-height: 0;
   display: flex;
   ${({ $isOpen }) =>
     $isOpen
       ? css`
-          flex: 1;
-          min-width: 360px;
+          width: 320px;
+          flex-shrink: 0;
         `
       : css`
           flex: 0 0 44px;
         `}
+`;
+
+// AI 채팅은 가운데 주역
+const AiColumn = styled.div`
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  min-width: 360px;
 `;
 
 const CodeColumn = styled.div`

@@ -83,7 +83,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   const grade = useGradeChallenge();
 
   // 패널 토글 상태(UI 전용 — 영속 대상 아님)
-  const [isAiOpen, setIsAiOpen] = useState(true);
+  const [isStatementOpen, setIsStatementOpen] = useState(true);
   const [isDirectEditEnabled, setIsDirectEditEnabled] = useState(true);
   const [isAiWriting, setIsAiWriting] = useState(false);
 
@@ -263,9 +263,9 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         <BackButton type="button" onClick={handleBackToList}>← 목록</BackButton>
         <Title>{challenge.title}</Title>
         {submitError && <ErrorText title={submitError}>{submitError}</ErrorText>}
-        {!isAiOpen && (
-          <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
-            AI 에이전트 열기
+        {!isStatementOpen && (
+          <Button variant="ghost" onClick={() => setIsStatementOpen(true)}>
+            요구사항 열기
           </Button>
         )}
         <NameInput
@@ -281,20 +281,20 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
       </TopBar>
 
       <Body>
-        <StatementColumn>
+        <StatementColumn $isOpen={isStatementOpen}>
           <ChallengeStatementPanel
             title={challenge.title}
             statement={challenge.statement}
+            isOpen={isStatementOpen}
+            onToggle={() => setIsStatementOpen((open) => !open)}
           />
         </StatementColumn>
 
-        <AiColumn $isOpen={isAiOpen}>
+        <AiColumn>
           <AiChatPanel
             aiPolicy={challenge.aiPolicy}
             questionsUsed={questionsUsed}
             tokensUsed={tokensUsed}
-            isOpen={isAiOpen}
-            onToggle={() => setIsAiOpen((open) => !open)}
             onTurnComplete={handleTurnComplete}
             isDirectEditEnabled={isDirectEditEnabled}
             onToggleDirectEdit={() => setIsDirectEditEnabled((enabled) => !enabled)}
@@ -436,25 +436,26 @@ const Body = styled.div`
   gap: ${({ theme }) => theme.spacing.sm};
 `;
 
-const StatementColumn = styled.div`
-  width: 320px;
-  min-height: 0;
-  flex-shrink: 0;
-`;
-
-// AI 채팅은 가운데 주역 — 열려 있으면 넓게, 접으면 얇은 바(44px)로 축소.
-const AiColumn = styled.div<{ $isOpen: boolean }>`
+const StatementColumn = styled.div<{ $isOpen: boolean }>`
   min-height: 0;
   display: flex;
   ${({ $isOpen }) =>
     $isOpen
       ? css`
-          flex: 1;
-          min-width: 340px;
+          width: 320px;
+          flex-shrink: 0;
         `
       : css`
           flex: 0 0 44px;
         `}
+`;
+
+// AI 채팅은 가운데 주역.
+const AiColumn = styled.div`
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  min-width: 340px;
 `;
 
 const WorkspaceColumn = styled.div`
