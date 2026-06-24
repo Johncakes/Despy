@@ -20,6 +20,7 @@ import {
   findLanguageById,
 } from '@/shared/core/constants/languages';
 import { useSolveSessionStore } from '@/shared/core/stores/solveSessionStore';
+import { useSolveHistoryStore } from '@/shared/core/stores/solveHistoryStore';
 import { useGradeAlgorithm } from '@/shared/core/queries/algorithmGradeQueries';
 import { applyFileEdit, type FileEdit } from '@/shared/lib/utils/markdownCode';
 import { Panel } from '@/shared/components/ui/Panel';
@@ -47,8 +48,17 @@ export function SolveView({ problem }: { problem: Problem }) {
   const setLanguage = useSolveSessionStore((state) => state.setLanguage);
   const recordAiTurn = useSolveSessionStore((state) => state.recordAiTurn);
 
+  const saveResult = useSolveHistoryStore((state) => state.saveResult);
+
   const [isAiOpen, setIsAiOpen] = useState(true);
   const gradeMutation = useGradeAlgorithm();
+
+  // 채점 완료 시 마이페이지 이력용으로 결과를 영속 저장한다.
+  useEffect(() => {
+    if (gradeMutation.data) {
+      saveResult(problem.id, gradeMutation.data);
+    }
+  }, [gradeMutation.data, problem.id, saveResult]);
 
   // AI 직접 편집 상태 (실시간 코드 미러링)
   const [isDirectEditEnabled, setIsDirectEditEnabled] = useState(true);

@@ -135,11 +135,12 @@ WebContainer 제어 로직은 **`shared/lib`** 에 두고, feature는 훅/콜백
 
 | 책임 | 위치(제안) | 비고 |
 |---|---|---|
-| WebContainer 부팅·mount·spawn 래퍼 | `shared/lib/webcontainer/runtime.ts` | 싱글턴 boot, 저수준 API 캡슐화 |
-| FS ↔ 에디터 동기화 | `shared/lib/webcontainer/fileSync.ts` | writeFile/readFile 디바운스 |
+| WebContainer 부팅·mount·spawn 래퍼 | `shared/lib/webcontainer/runtime.ts` | 싱글턴 boot, 저수준 API 캡슐화 + 미리보기 콘솔 브리지(`setPreviewScript`, §3.5) |
+| FS ↔ 에디터 동기화 | `shared/lib/webcontainer/fileSync.ts` | writeFile 디바운스 + remove/rename(파일 트리 CRUD, §3.3) |
 | 테스트 실행·결과 파싱 | `shared/lib/webcontainer/testRunner.ts` | reporter JSON → 도메인 타입 |
-| React 통합 훅 | `features/solve/useWorkspace.ts` | 부팅 상태·미리보기 URL·로그·실행 |
-| UI | `features/solve/components/WorkspacePanel.tsx` | 에디터+미리보기+콘솔 탭 |
+| React 통합 훅 | `features/solve/useWorkspace.ts` | 부팅 상태·미리보기 URL·로그·실행 + 파일 CRUD·브라우저 콘솔 수집 |
+| 파일 트리 UI | `features/solve/components/FileTree.tsx`(+`FileTreeIcons.tsx`) | VSC식 중첩 트리·동적 CRUD(생성/삭제/이름변경/이동), SVG 아이콘 |
+| 워크스페이스 UI | `features/solve/components/WorkspacePanel.tsx` | 탭: 미리보기·콘솔(서버 로그)·브라우저 콘솔(미리보기 앱)·테스트·API 콘솔 등 |
 
 ### 3.3 파일 동기화 모델
 
@@ -147,6 +148,11 @@ WebContainer 제어 로직은 **`shared/lib`** 에 두고, feature는 훅/콜백
   **에디터(메모리) → FS** 단방향 쓰기를 기본으로 한다. (학생 편집 → debounce → `fs.writeFile`)
 - AI 미러링도 동일 경로: AI가 코드를 쓰면 활성 파일 버퍼 갱신 → FS 반영 → dev 서버 HMR로 미리보기 자동 갱신.
 - **잠금 파일**(`lockedPaths`)은 FS에는 존재하되 에디터에서 read-only로 표시하고 쓰기를 막는다.
+- **파일 트리 CRUD**(학생 워크스페이스, VSC식): `FileTree`에서 파일/폴더를 생성·삭제·이름변경/이동한다.
+  `useWorkspace`의 `createFile`/`deletePath`/`renamePath`가 편집 버퍼와 FS를 함께 갱신하고
+  (→ `fileSync.removeWorkspacePath`/`renameWorkspacePath`, 삭제/이동 직전 해당 경로의 대기 쓰기를
+  `cancel(path)`로 취소해 되살아남 방지), 잠금 파일은 삭제/이름변경에서 제외한다. **빈 폴더**는
+  경로→내용 평면 맵으로 표현되지 않아 FileTree 로컬 상태로만 추적한다(파일이 생기면 자연히 실폴더).
 
 ### 3.4 테스트 스택 & 취약성 대응 (채점 신뢰성의 핵심)
 
@@ -167,6 +173,24 @@ WebContainer 제어 로직은 **`shared/lib`** 에 두고, feature는 훅/콜백
 
 **프로세스 가드**: 학생/AI 코드에 무한 루프·무한 빌드가 섞이면 탭이 멈춘다. `runtime.ts`의 `spawn`
 래퍼에 **타임아웃 + kill** 가드를 둔다(특히 test 실행).
+
+### 3.5 브라우저 콘솔 브리지 (미리보기 앱 로그 수집)
+
+미리보기는 cross-origin iframe(`*.webcontainer.io`)이라 호스트(despy)에서 그 안의 `console`이나
+런타임 에러에 직접 접근할 수 없다. 그래서 **앱 스크립트보다 먼저 실행되는 포워딩 스크립트**를 주입해
+출력을 부모로 중계한다(실 개발자도구 콘솔 대용 — `WorkspacePanel`의 '브라우저 콘솔' 탭).
+
+- **주입**: `runtime.ts`의 `installPreviewConsoleBridge()`가 `container.setPreviewScript(...)`로
+  `PREVIEW_CONSOLE_SCRIPT`를 등록한다. 부팅 직후(dev 서버보다 먼저) 호출해 앱 코드 실행 전 가로채기를 건다.
+  스크립트는 `console.log/info/warn/error/debug`를 감싸고 `error`·`unhandledrejection`을 듣는다.
+- **전송**: 가로챈 출력을 `window.parent.postMessage({ source: 'despy-console', level, message }, '*')`로 보낸다.
+  인자는 문자열화한다(직렬화 불가 시 `String` 폴백). `__despyConsoleBridge` 가드로 중복 주입을 막는다.
+- **수신**: `useWorkspace`가 `message` 리스너로 `source: 'despy-console'` 서명만 받아 `consoleEntries`에
+  누적한다(최대 `MAX_CONSOLE_ENTRIES`=500, `clearConsole`로 비움). 미리보기는 별 출처라 origin
+  화이트리스트가 불가해 **서명으로만** 거른다(WebContainer 내부 메시지는 자동 제외).
+- **구분**: '콘솔' 탭 = 서버 프로세스 로그(npm/dev stdout), '브라우저 콘솔' 탭 = 미리보기 앱 console/에러,
+  'API 콘솔' 탭 = 컨테이너 내부 백엔드로의 HTTP 요청(별개 기능). cross-origin이라 `console.log`까지
+  잡으려면 이 주입 방식이 필요하다(WebContainer 내장 `preview-message`는 에러/`console.error`만 중계).
 
 ---
 
@@ -298,9 +322,9 @@ export interface ChallengeGradingResult {
 `/solve/[problemId]` → `SolveView`. 3열 레이아웃 유지하되 우측을 워크스페이스로 강화.
 
 ```
-┌── 좌: ProblemPanel ──┬── 중: AiChatPanel ──┬── 우: WorkspacePanel ─────────────┐
-│  마크다운 지문        │  AI 도우미(주역)     │  [에디터] [미리보기] [콘솔] 탭      │
-│  요구사항·제약        │  남은 질문/토큰 게이지 │  Monaco ↔ WebContainer FS         │
+┌── 좌: ProblemPanel ──┬── 중: AiChatPanel ──┬── 우: 에디터 + WorkspacePanel ─────┐
+│  마크다운 지문        │  AI 도우미(주역)     │  파일트리(CRUD) + Monaco 에디터    │
+│  요구사항·제약        │  남은 질문/토큰 게이지 │  [미리보기][콘솔][브라우저][테스트]…│
 │                      │  AI 직접 편집 토글    │  ▶ dev 서버 미리보기 iframe        │
 │                      │                      │  ▶ npm test 실행 → 결과            │
 └──────────────────────┴──────────────────────┴────────────────────────────────────┘
@@ -308,11 +332,12 @@ export interface ChallengeGradingResult {
 ```
 
 플로우:
-1. 진입 시 `WebContainer.boot()` → `mount(template)` → `npm install` (콘솔에 진행 로그).
+1. 진입 시 `WebContainer.boot()` → 미리보기 콘솔 브리지 주입(§3.5) → `mount(template)` → `npm install` (콘솔에 진행 로그).
 2. `npm run dev` 기동 → `server-ready` 이벤트 → 미리보기 iframe 표시.
 3. 학생이 AI에 질문 → AI가 코드 작성 → **미러링**으로 에디터/FS 갱신 → HMR로 미리보기 자동 갱신.
-4. 학생 직접 편집도 가능(잠금 파일 제외).
-5. **제출**:
+4. 학생 직접 편집도 가능(잠금 파일 제외). 파일 트리에서 파일/폴더를 직접 생성·삭제·이름변경/이동(§3.3).
+5. 미리보기 앱의 `console.*`/런타임 에러는 '브라우저 콘솔' 탭에 실시간 표시(§3.5).
+6. **제출**:
    - `testFiles`를 FS에 주입 → `npm test --reporter=json` → 결과 캡처(`AutoTestResult`).
    - 학생 코드 + 변경 diff + 루브릭을 `/api/grade`로 전송 → `RubricGradingResult`.
    - 가중합 → `ChallengeGradingResult` → 결과 패널 표시.
@@ -494,6 +519,18 @@ feature가 훅으로 감싼다. `shared → features` 금지 유지.
    서버 샌드박스 인프라(예: e2b)는 P3 이후 별도 단계로 붙인다. §7.2.
 7. **테스트 스택 = Vitest + Testing Library + jsdom 확정** (Playwright 제외). §3.4.
 8. **파일 저장소 = IndexedDB + delta** 확정. §9.1.
+
+### 후속 후보 (검토 — 미확정)
+
+- **콘솔 → AI 컨텍스트 첨부 버튼** (검토 2026-06-25). 브라우저 콘솔(§3.5)의 출력을 한 번에
+  AI 질문 컨텍스트로 넘기는 버튼. **구현비는 낮다**(`consoleEntries` + `ChallengeSolveView`의
+  `getCodeContext` 첨부 경로 + 토큰 카운팅이 모두 존재 → 소규모 배선). 그러나 ROI는 **스코프에 달림**:
+  - ✅ **권장**: *에러/경고만*, 최근 N개·길이 캡, **명시적 버튼**(자동 ❌), 첨부분도 토큰 한도에 포함.
+    실제 디버깅 루프(에러→AI→수정)를 재현하면서 비용·노이즈를 통제.
+  - ⚠️ **낮은 ROI**: *콘솔 전체 자동 덤프* — 토큰 폭증·노이즈, 그리고 **"어떤 컨텍스트를 줄지 고르는
+    판단"** 자체가 이 플랫폼이 평가하려는 역량이라 자동화하면 평가 신호가 약해질 수 있다.
+  - ❓ **열린 결정**: 교수 정책(`aiPolicy`)에서 on/off 토글로 둘지 — 두면 `aiPolicy` 스키마 변경 →
+    persist 마이그레이션 필요(Blocking, §9). 과제별로 난이도·평가 대상이 달라지므로 가치는 있으나 별도 합의.
 
 ---
 

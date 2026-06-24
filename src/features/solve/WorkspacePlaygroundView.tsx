@@ -108,6 +108,9 @@ export function WorkspacePlaygroundView() {
             onClearConsole={workspace.clearConsole}
             apiConsole={workspace.apiConsole}
             onSendApiRequest={workspace.sendApiRequest}
+            apiLogs={workspace.apiLogs}
+            onClearApiLogs={workspace.clearApiLogs}
+            dbState={workspace.dbState}
           />
         </PreviewColumn>
       </Body>

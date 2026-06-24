@@ -83,6 +83,7 @@ src/
 │   ├── author/challenge/[challengeId]/submissions/page.tsx 교수 채점 대시보드 진입점 (집계 + 프롬프트별 diff 타임라인)
 │   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (알고리즘 — AI 채점)
 │   ├── workspace/[challengeId]/page.tsx 학생 과제 풀이(워크스페이스) 진입점 (피벗 P1)
+│   ├── mypage/page.tsx            마이페이지 진입점 (알고리즘 풀이 이력 + 과제 제출 이력 대시보드 — features/mypage)
 │   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
 │   ├── login/page.tsx · signup/page.tsx   인증 화면 진입점 (features/auth)
 │   ├── admin/users/page.tsx      사용자/역할 관리 진입점 (관리자 전용 — features/admin)
@@ -105,24 +106,25 @@ src/
 │   │                             GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
 │   │                             + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
 │   │                               AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
-│   │                               WorkspacePanel·WorkspaceEditorPanel·FileTree·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 요청 콘솔 — Postman 라이트)
+│   │                               WorkspacePanel(미리보기·API 콘솔·API 로그·DB 상태·콘솔·브라우저·테스트 탭)·WorkspaceEditorPanel·FileTree(VSC식 중첩 트리·동적 CRUD: 생성/삭제/이름변경/이동)·FileTreeIcons(인라인 SVG 아이콘)·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 요청 콘솔 — Postman 라이트)·ApiLogList(요청/응답 실시간 로그)·DbInspector(저장소 db.json 실시간 표)
 │   │                               + (피벗 P3) ChallengeGradingResultPanel(제출 채점 결과 모달)
+│   ├── mypage/                   마이페이지: MyPageView (알고리즘 풀이 이력 카드 그리드 + 과제 제출 테이블 — 로컬 스토어 집계)
 │   ├── auth/                     인증: LoginView, SignupView (이메일/비번 + JWT)
 │   └── admin/                    사용자 관리: AdminUsersView (역할 승격 — 관리자 전용)
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
     │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체) · authApi.ts (로그인/가입/로그아웃/me·관리자 사용자 fetch)
-    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (Zustand persist)
+    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (코드/언어/AI 사용량 per-problem), solveHistoryStore.ts (알고리즘 채점 결과 이력 per-problem — 마이페이지 소스)
     │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), authQueries.ts (useCurrentUser·login/signup/logout·관리자 사용자/역할), queryKeys.ts (auth·admin)
     │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열 / 인증 UserRole·AuthUser)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
-    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT))
+    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT). 백엔드 템플릿은 db 모듈(파일 백업 db.json+인메모리, createApp(db) DI)·요청 로깅 미들웨어(stdout 센티넬→API 로그)·node --watch 자동 재시작 포함)
     ├── lib/                      재사용 로직
     │   ├── auth/                 password.ts(bcryptjs 해시) · jwt.ts(jose 서명·검증 + SESSION_COOKIE) · session.ts(쿠키 발급/해제 · getCurrentUser·requireUser·requireRole 가드)
     │   ├── db/                   mongodb.ts (연결 싱글턴 — lazy, getClient/getDb) · users.ts (users 컬렉션 리포지토리 — passwordHash 제외 매핑)
     │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
-    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
+    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피 · readContainerFile/watchContainerFile은 db.json을 fs.watch→DB 상태 라이브 뷰) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출), lineDiff.ts (라인/파일트리 diff — 대시보드 코드 변경점)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트
@@ -184,11 +186,11 @@ interface ListProps {
   로그인/가입/로그아웃·관리자 사용자/역할은 mutation. **현재 사용자(서버 상태)는 Query가 단일 출처**(별도 auth store 없음).
   `queryKeys.ts`는 `auth.me`·`admin.users`를 가진다.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 — 채점결과+제출코드+AI프롬프트, 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `submissionStore`(과제별 제출 — 채점결과+제출코드+AI프롬프트, 교수 대시보드 소스, 피벗), `problemStore`(알고리즘 문제), `solveSessionStore`(문제별 코드·언어·AI 사용량), `solveHistoryStore`(문제별 마지막 채점 결과 — 마이페이지 소스).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v3, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3)), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v1, 피벗 — localStorage), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v3, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3)), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v1, 피벗 — localStorage), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1), `solveHistoryStore → 'despy-solve-history'` (v1 — 알고리즘 채점 결과 이력)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 

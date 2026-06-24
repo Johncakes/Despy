@@ -335,3 +335,24 @@ src/
 P0/P1 검증용 headless Chrome + CDP 스크립트는 세션 scratchpad에 위치(`repro2.mjs` 등).
 재검증 시 `npm run dev` 후 시스템 Chrome(`puppeteer-core`, `executablePath`)로 `/playground`·`/workspace/[id]`
 로드 → 데모 버튼/편집 → 미리보기 프레임(`webcontainer-api.io`) 텍스트 변화 확인.
+
+---
+
+## 백엔드 실시간 확장 (2026-06-25)
+
+프론트/백/ML 실시간 바이브코딩 피벗 중 **백엔드** 부분 구현. 상세 명세·결정·파일 맵은
+[spec-backend-realtime.md](./spec-backend-realtime.md).
+
+- **풀스택 단일 컨테이너**: `FULLSTACK_TODO_TEMPLATE`(Vite+Express, `concurrently`+Vite proxy).
+  `startDevServer({previewPort})`로 멀티포트 중 프론트만 미리보기 확정(템플릿 추론, 스키마 무변경).
+- **API 콘솔**(`ApiConsole`): 요청을 컨테이너 안 node로 실행(`sendHttpRequest`) — 호스트 직접 fetch의
+  CORS/COEP 회피.
+- **API 로그**(`ApiLogList`): 잠긴 서버의 로깅 미들웨어 → stdout 센티넬 → `useWorkspace.handleDevOutput`
+  파싱. 콘솔·프론트 요청 모두 캡처.
+- **DB 상태**(`DbInspector`): 파일 백업 `db` 모듈(`createApp(db)` DI) + 호스트 `fs.watch(db.json)` → 실시간 표.
+  테스트는 인메모리 db로 격리(supertest 채점 계약 유지).
+- `node --watch`로 편집 시 백엔드 자동 재시작.
+- `challengeStore` persist v2→v3 additive migrate(풀스택 샘플 시드 보강).
+
+**상태**: `typecheck`/`lint`/`test`(8파일 81테스트) ✅. WebContainer 부팅 의존 기능이라 **브라우저 실측 대기**
+(특히 `node --watch` 동작 — 실패 시 dev 스크립트에서 `--watch`만 제거).

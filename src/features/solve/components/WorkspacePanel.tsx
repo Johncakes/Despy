@@ -16,12 +16,15 @@ import type {
   ApiConsoleConfig,
   ApiConsoleRequest,
   ApiConsoleResponse,
+  ApiLogEntry,
   AutoTestResult,
 } from '@/shared/core/types';
 import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
 import { ApiConsole } from '@/features/solve/components/ApiConsole';
+import { ApiLogList } from '@/features/solve/components/ApiLogList';
+import { DbInspector } from '@/features/solve/components/DbInspector';
 import type {
   BrowserConsoleEntry,
   BrowserConsoleLevel,
@@ -79,7 +82,7 @@ function getProgressPercent(phase: WorkspacePhase): number {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-type WorkspaceTab = 'preview' | 'api' | 'console' | 'browser' | 'test';
+type WorkspaceTab = 'preview' | 'api' | 'apilog' | 'db' | 'console' | 'browser' | 'test';
 
 interface WorkspacePanelProps {
   phase: WorkspacePhase;
@@ -105,10 +108,18 @@ interface WorkspacePanelProps {
   onClearConsole: () => void;
 
   // ── 백엔드 API 요청 콘솔 ──
-  /** API 콘솔 설정(백엔드가 있는 워크스페이스에만). null이면 콘솔 탭을 숨긴다. */
+  /** API 콘솔 설정(백엔드가 있는 워크스페이스에만). null이면 콘솔·로그·DB 탭을 숨긴다. */
   apiConsole?: ApiConsoleConfig | null;
   /** API 요청 전송 콜백(컨테이너 안에서 실행). apiConsole이 있을 때만 사용한다. */
   onSendApiRequest?: (request: ApiConsoleRequest) => Promise<ApiConsoleResponse>;
+
+  // ── 백엔드 실시간 모니터 ──
+  /** 백엔드가 처리한 요청/응답 실시간 로그(API 로그 탭). */
+  apiLogs?: ApiLogEntry[];
+  /** API 로그 비우기 콜백. */
+  onClearApiLogs?: () => void;
+  /** 저장소(db.json) 현재 상태(파싱된 JSON, DB 상태 탭). apiConsole.dbFilePath 있을 때 표시. */
+  dbState?: unknown;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -127,6 +138,9 @@ export function WorkspacePanel({
   onClearConsole,
   apiConsole,
   onSendApiRequest,
+  apiLogs = [],
+  onClearApiLogs,
+  dbState,
 }: WorkspacePanelProps) {
   // 백엔드 단독(프론트 미리보기 없음)이면 콘솔을 주 탭으로 연다(미리보기는 raw JSON뿐).
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(
@@ -165,6 +179,16 @@ export function WorkspacePanel({
           {apiConsole && onSendApiRequest && (
             <Tab $active={activeTab === 'api'} onClick={() => setActiveTab('api')}>
               API 콘솔
+            </Tab>
+          )}
+          {apiConsole && (
+            <Tab $active={activeTab === 'apilog'} onClick={() => setActiveTab('apilog')}>
+              API 로그
+            </Tab>
+          )}
+          {apiConsole?.dbFilePath && (
+            <Tab $active={activeTab === 'db'} onClick={() => setActiveTab('db')}>
+              DB 상태
             </Tab>
           )}
           <Tab $active={activeTab === 'console'} onClick={() => setActiveTab('console')}>
@@ -235,6 +259,14 @@ export function WorkspacePanel({
             isReady={phase === 'ready'}
             onSend={onSendApiRequest}
           />
+        )}
+
+        {activeTab === 'apilog' && (
+          <ApiLogList entries={apiLogs} onClear={onClearApiLogs ?? (() => {})} />
+        )}
+
+        {activeTab === 'db' && (
+          <DbInspector data={dbState} isReady={phase === 'ready'} />
         )}
 
         {activeTab === 'console' && (

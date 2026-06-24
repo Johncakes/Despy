@@ -56,6 +56,9 @@ export default function HomePage() {
                   <Button variant="primary">로그인</Button>
                 </Link>
               )}
+              <Link href="/mypage">
+                <Button variant="ghost">마이페이지</Button>
+              </Link>
             </AccountArea>
           )}
         </TopBar>

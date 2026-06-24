@@ -337,6 +337,9 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               onClearConsole={workspace.clearConsole}
               apiConsole={workspace.apiConsole}
               onSendApiRequest={workspace.sendApiRequest}
+              apiLogs={workspace.apiLogs}
+              onClearApiLogs={workspace.clearApiLogs}
+              dbState={workspace.dbState}
             />
           </PreviewArea>
         </WorkspaceColumn>

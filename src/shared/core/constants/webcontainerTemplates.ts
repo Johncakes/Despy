@@ -215,11 +215,13 @@ export const VITE_REACT_SAMPLE_LOCKED_PATHS: readonly string[] = [
 // ── 백엔드(Express) 과제 템플릿 ─────────────────────────────────────────────
 
 /**
- * 최소 Express + 인메모리 Todo API 스타터 (경로→파일 내용 평면 맵).
+ * 최소 Express + 파일 백업 Todo API 스타터 (경로→파일 내용 평면 맵).
  *
- * 외부 DB·외부 네트워크 없이 자기완결형으로 동작한다(인메모리 — 서버 재시작 시 초기화).
- * `createApp()`이 앱을 만드는 팩토리라, dev 서버(server.js)와 테스트(supertest)가
- * 같은 정의를 공유한다. `npm test`는 Vitest(node 환경)로 supertest 케이스를 돌린다.
+ * 외부 DB·외부 네트워크 없이 자기완결형으로 동작한다. 저장소는 잠긴 `db` 모듈이며,
+ * dev 서버는 파일 백업(src/data/db.json — 세션 내 영속)을, 테스트는 인메모리(격리)를
+ * 주입한다(`createApp(db)` DI). dev 서버는 학생 앱을 로깅 미들웨어로 감싸 요청/응답을
+ * stdout 센티넬로 흘리고(→ 호스트 'API 로그'), db는 매 쓰기마다 파일에 기록한다
+ * (→ 호스트가 fs.watch로 'DB 상태' 실시간 표시). `node --watch`로 편집 시 자동 재시작.
  *
  * 스타터에는 `GET /todos`만 구현돼 있고, `POST /todos`는 학생이 채워야 한다(아래
  * 샘플 과제 sample-express-todo-api 참조). app.test.js는 채점 계약(스펙) 역할을 한다.
@@ -232,7 +234,9 @@ export const EXPRESS_TODO_API_TEMPLATE: ProjectFiles = {
       version: '0.0.0',
       type: 'module',
       scripts: {
-        dev: 'node src/server.js',
+        // --watch: src 변경 시 서버 자동 재시작(편집 → 즉시 반영). db.json은 import가
+        // 아니라 fs로 읽으므로 watch 대상이 아니다(쓰기→재시작 루프 없음).
+        dev: 'node --watch src/server.js',
         test: 'vitest run',
       },
       dependencies: {
@@ -250,17 +254,11 @@ export const EXPRESS_TODO_API_TEMPLATE: ProjectFiles = {
   // 학생 주 작업 영역 — 라우트 정의. POST /todos를 여기에 구현한다.
   'src/app.js': `import express from 'express';
 
-// 주어진 앱 팩토리 — server.js(미리보기)와 테스트(supertest)가 이 함수로 앱을 만든다.
-// 저장소는 인메모리이며, createApp() 호출마다 새 상태로 시작한다(테스트 격리).
-export function createApp() {
+// 주어진 앱 팩토리 — db는 server.js(파일 백업) 또는 테스트(인메모리)가 주입한다.
+// 라우트는 db.todos(목록)·db.addTodo(title)(추가)로 저장소를 다룬다.
+export function createApp(db) {
   const app = express();
   app.use(express.json());
-
-  let nextId = 3;
-  const todos = [
-    { id: 1, title: '우유 사기', done: false },
-    { id: 2, title: '운동하기', done: true },
-  ];
 
   // 미리보기/상태 확인용 루트. 수정하지 않아도 된다.
   app.get('/', (req, res) => {
@@ -269,45 +267,150 @@ export function createApp() {
 
   // 할 일 목록 조회 — 이미 구현되어 있다.
   app.get('/todos', (req, res) => {
-    res.json(todos);
+    res.json(db.todos);
   });
 
   // TODO: POST /todos 를 구현하세요.
-  //  - 요청 body의 { title }을 받아 새 할 일을 추가한다.
-  //  - 새 항목은 { id, title, done: false } 형태이며 id는 자동 증가한다.
-  //  - 성공 시 상태 코드 201과 생성된 항목(JSON)을 반환한다.
-  //  - 힌트: todos.push(...), nextId 활용, res.status(201).json(...)
+  //  - 요청 body의 { title }을 db.addTodo(title)로 추가한다.
+  //  - addTodo가 돌려준 새 항목을 상태 코드 201과 함께 JSON으로 반환한다.
+  //  - 구현하면 'API 로그'에 요청/응답이, 'DB 상태'에 새 항목이 실시간 표시된다.
 
   return app;
 }
 `,
 
-  // 미리보기용 dev 서버(잠금) — 포트를 열어 server-ready 이벤트를 발생시킨다.
-  'src/server.js': `import { createApp } from './app.js';
+  // 저장소 모듈(잠금) — 파일 백업/인메모리 두 변형을 제공한다. 학생은 db API만 쓴다.
+  'src/db.js': `import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 
-// WebContainer 미리보기를 위해 포트를 연다 — server-ready가 여기서 발생한다.
+// 시드 — 최초 상태(파일이 없을 때 1회 기록).
+function seed() {
+  return {
+    todos: [
+      { id: 1, title: '우유 사기', done: false },
+      { id: 2, title: '운동하기', done: true },
+    ],
+    nextId: 3,
+  };
+}
+
+// 공통 저장소 동작 — load/save 주입으로 파일/인메모리 변형을 만든다.
+function makeDb(load, save) {
+  const state = load();
+  return {
+    // 현재 할 일 목록(읽기용).
+    get todos() {
+      return state.todos;
+    },
+    // 새 할 일을 추가하고 저장한다(파일 백업이면 디스크 기록 → 호스트가 'DB 상태'로 표시).
+    addTodo(title) {
+      const todo = { id: state.nextId++, title, done: false };
+      state.todos.push(todo);
+      save(state);
+      return todo;
+    },
+    // todos를 직접 수정했을 때 호출해 저장/반영한다(선택).
+    save() {
+      save(state);
+    },
+  };
+}
+
+// 파일 백업 저장소 — JSON 파일에 영속한다(세션 내 유지 + 호스트 watch 대상).
+export function createFileDb(path) {
+  const save = (state) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(state, null, 2));
+  };
+  const load = () => {
+    if (existsSync(path)) {
+      try {
+        return JSON.parse(readFileSync(path, 'utf8'));
+      } catch {
+        /* 깨졌으면 시드로 재생성 */
+      }
+    }
+    const initial = seed();
+    save(initial);
+    return initial;
+  };
+  return makeDb(load, save);
+}
+
+// 인메모리 저장소 — 파일 없이 매번 새 시드로 시작한다(테스트 격리용).
+export function createMemoryDb() {
+  return makeDb(seed, () => {});
+}
+`,
+
+  // 미리보기용 dev 서버(잠금) — 파일 백업 db 주입 + 요청 로깅 미들웨어로 학생 앱을 감싼다.
+  'src/server.js': `import express from 'express';
+import { createApp } from './app.js';
+import { createFileDb } from './db.js';
+
+// 파일 백업 DB — src/data/db.json에 저장된다(호스트가 watch해 'DB 상태'를 실시간 표시).
+const db = createFileDb('src/data/db.json');
+
+// 학생 앱을 감싸 요청/응답을 로깅한다(stdout → 호스트 'API 로그'). express.json은 로거가
+// 요청 바디를 읽도록 학생 앱보다 먼저 둔다(이중 파싱은 무해).
+const app = express();
+app.use(express.json());
+app.use(despyRequestLogger);
+app.use(createApp(db));
+
 const PORT = process.env.PORT || 3000;
-createApp().listen(PORT, () => {
+app.listen(PORT, () => {
   console.log('despy todo API listening on http://localhost:' + PORT);
 });
+
+// 요청 1건의 메서드/경로/상태/소요/요청·응답 바디를 센티넬 JSON 한 줄로 출력한다.
+// 호스트(useWorkspace)가 dev 출력에서 이 줄만 파싱해 'API 로그'로 보여준다.
+function despyRequestLogger(req, res, next) {
+  const started = Date.now();
+  let resBody;
+  const json = res.json.bind(res);
+  res.json = (payload) => {
+    resBody = payload;
+    return json(payload);
+  };
+  res.on('finish', () => {
+    const entry = {
+      method: req.method,
+      path: req.originalUrl || req.url,
+      status: res.statusCode,
+      durationMs: Date.now() - started,
+      reqBody: req.body && Object.keys(req.body).length ? req.body : undefined,
+      resBody,
+    };
+    try {
+      process.stdout.write('__DESPY_LOG__' + JSON.stringify(entry) + '__DESPY_LOG_END__\\n');
+    } catch {
+      /* 직렬화 불가한 응답은 로그를 건너뛴다 */
+    }
+  });
+  next();
+}
 `,
 
   // 채점 계약(스펙) — supertest로 앱을 인프로세스에 올려 HTTP 행동을 검증한다(잠금).
-  // GET 테스트는 스타터에서 통과하고, POST 테스트는 학생이 구현해야 통과한다(red→green).
+  // 각 테스트는 인메모리 db로 격리한다(파일 백업과 달리 상태가 섞이지 않는다).
   'src/app.test.js': `import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
+import { createMemoryDb } from './db.js';
+
+const makeApp = () => createApp(createMemoryDb());
 
 describe('Todo API', () => {
   it('GET /todos는 할 일 목록(배열)을 반환한다', async () => {
-    const res = await request(createApp()).get('/todos');
+    const res = await request(makeApp()).get('/todos');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
   });
 
   it('POST /todos는 새 할 일을 추가하고 201로 응답한다', async () => {
-    const res = await request(createApp())
+    const res = await request(makeApp())
       .post('/todos')
       .send({ title: '책 읽기' });
     expect(res.status).toBe(201);
@@ -316,7 +419,7 @@ describe('Todo API', () => {
   });
 
   it('POST 후 GET 목록에 추가한 항목이 포함된다', async () => {
-    const app = createApp();
+    const app = makeApp();
     await request(app).post('/todos').send({ title: '청소하기' });
     const res = await request(app).get('/todos');
     const titles = res.body.map((todo) => todo.title);
@@ -329,13 +432,14 @@ describe('Todo API', () => {
 /**
  * Express 백엔드 스타터에서 학생이 편집할 수 없는(read-only) 경로.
  *
- * package.json(빌드/의존성)·server.js(주어진 실행 골격)·app.test.js(채점 계약)는
- * 잠그고, 라우트 정의(src/app.js)만 편집 가능하게 한다. 채점 스펙(app.test.js)을
- * 잠가 무결성(테스트 변조 방지)을 지킨다.
+ * package.json(빌드/의존성)·server.js(실행 골격+로깅)·db.js(저장소 모듈)·app.test.js
+ * (채점 계약)는 잠그고, 라우트 정의(src/app.js)만 편집 가능하게 한다. 채점 스펙을 잠가
+ * 무결성(테스트 변조 방지)을 지킨다.
  */
 export const EXPRESS_TODO_API_LOCKED_PATHS: readonly string[] = [
   'package.json',
   'src/server.js',
+  'src/db.js',
   'src/app.test.js',
 ];
 
@@ -359,8 +463,11 @@ export const FULLSTACK_PREVIEW_PORT = 5173;
  * CORS 없음, 실제 배포 구조와 동일). 미리보기는 프론트(Vite)만 노출하고, 학생이 프론트 UI를
  * 조작하면 그게 자기 백엔드 API를 때려 결과가 실시간으로 화면에 반영된다.
  *
- * 저장소는 인메모리(서버 재시작 시 초기화)이며 `createApp()` 팩토리를 dev 서버·테스트가
- * 공유한다. 채점은 두 계층을 한 번의 `npm test`로 검증한다:
+ * 저장소는 잠긴 `db` 모듈(server/db.js)이며 dev 서버는 파일 백업(server/data/db.json —
+ * 세션 영속 + 호스트가 fs.watch로 'DB 상태' 표시), 테스트는 인메모리(격리)를 주입한다
+ * (`createApp(db)` DI). dev 서버는 학생 앱을 로깅 미들웨어로 감싸 요청/응답을 stdout
+ * 센티넬로 흘리고(→ 호스트 'API 로그'), `node --watch`로 편집 시 자동 재시작한다.
+ * 채점은 두 계층을 한 번의 `npm test`로 검증한다:
  *   - 프론트(src/App.test.jsx): happy-dom 환경 + fetch 목으로 렌더/목록 표시 검증
  *   - 백엔드(server/app.test.js): `// @vitest-environment node` 도크블록으로 node 환경,
  *     supertest로 앱을 인프로세스에 올려 HTTP 행동 검증(채점 계약 — 잠금)
@@ -377,8 +484,9 @@ export const FULLSTACK_TODO_TEMPLATE: ProjectFiles = {
       type: 'module',
       scripts: {
         // 한 컨테이너에서 백(Express)·프론트(Vite)를 동시에 띄운다. -k 미사용:
-        // 한쪽이 죽어도 다른 쪽은 살려 미리보기/피드백을 유지한다.
-        dev: 'concurrently -n api,web "node server/index.js" "vite"',
+        // 한쪽이 죽어도 다른 쪽은 살려 미리보기/피드백을 유지한다. 백엔드는 --watch로
+        // server 변경 시 자동 재시작(편집 → 즉시 반영). 프론트는 Vite HMR로 갱신된다.
+        dev: 'concurrently -n api,web "node --watch server/index.js" "vite"',
         test: 'vitest run',
       },
       dependencies: {
@@ -581,60 +689,160 @@ describe('App (프론트)', () => {
   // 백엔드 주 작업 영역 — 라우트 정의. POST /api/todos를 여기에 구현한다.
   'server/app.js': `import express from 'express';
 
-// 주어진 앱 팩토리 — server/index.js(미리보기)와 테스트(supertest)가 이 함수로 앱을 만든다.
-// 저장소는 인메모리이며, createApp() 호출마다 새 상태로 시작한다(테스트 격리).
-export function createApp() {
+// 주어진 앱 팩토리 — db는 server/index.js(파일 백업) 또는 테스트(인메모리)가 주입한다.
+// 라우트는 db.todos(목록)·db.addTodo(title)(추가)로 저장소를 다룬다.
+export function createApp(db) {
   const app = express();
   app.use(express.json());
 
-  let nextId = 3;
-  const todos = [
-    { id: 1, title: '우유 사기', done: false },
-    { id: 2, title: '운동하기', done: true },
-  ];
-
   // 할 일 목록 조회 — 이미 구현되어 있다(프론트가 마운트 시 호출).
   app.get('/api/todos', (req, res) => {
-    res.json(todos);
+    res.json(db.todos);
   });
 
   // TODO: POST /api/todos 를 구현하세요.
-  //  - 요청 body의 { title }을 받아 새 할 일을 추가한다.
-  //  - 새 항목은 { id, title, done: false } 형태이며 id는 자동 증가한다(nextId).
-  //  - 성공 시 상태 코드 201과 생성된 항목(JSON)을 반환한다.
-  //  - 구현하면 프론트의 "추가" 버튼이 즉시 동작하고 npm test가 통과한다.
+  //  - 요청 body의 { title }을 db.addTodo(title)로 추가한다.
+  //  - addTodo가 돌려준 새 항목을 상태 코드 201과 함께 JSON으로 반환한다.
+  //  - 구현하면 프론트 "추가" 버튼이 동작하고, 'API 로그'·'DB 상태'에 실시간 표시된다.
 
   return app;
 }
 `,
 
-  // 미리보기용 백엔드 dev 서버(잠금) — 3000 포트를 열어 Vite proxy(/api → :3000)의 대상이 된다.
-  'server/index.js': `import { createApp } from './app.js';
+  // 저장소 모듈(잠금) — 파일 백업/인메모리 두 변형을 제공한다. 학생은 db API만 쓴다.
+  'server/db.js': `import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 
-// WebContainer 미리보기를 위해 백엔드 포트를 연다 — Vite proxy(/api → :3000)의 대상.
+// 시드 — 최초 상태(파일이 없을 때 1회 기록).
+function seed() {
+  return {
+    todos: [
+      { id: 1, title: '우유 사기', done: false },
+      { id: 2, title: '운동하기', done: true },
+    ],
+    nextId: 3,
+  };
+}
+
+// 공통 저장소 동작 — load/save 주입으로 파일/인메모리 변형을 만든다.
+function makeDb(load, save) {
+  const state = load();
+  return {
+    // 현재 할 일 목록(읽기용).
+    get todos() {
+      return state.todos;
+    },
+    // 새 할 일을 추가하고 저장한다(파일 백업이면 디스크 기록 → 호스트가 'DB 상태'로 표시).
+    addTodo(title) {
+      const todo = { id: state.nextId++, title, done: false };
+      state.todos.push(todo);
+      save(state);
+      return todo;
+    },
+    // todos를 직접 수정했을 때 호출해 저장/반영한다(선택).
+    save() {
+      save(state);
+    },
+  };
+}
+
+// 파일 백업 저장소 — JSON 파일에 영속한다(세션 내 유지 + 호스트 watch 대상).
+export function createFileDb(path) {
+  const save = (state) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(state, null, 2));
+  };
+  const load = () => {
+    if (existsSync(path)) {
+      try {
+        return JSON.parse(readFileSync(path, 'utf8'));
+      } catch {
+        /* 깨졌으면 시드로 재생성 */
+      }
+    }
+    const initial = seed();
+    save(initial);
+    return initial;
+  };
+  return makeDb(load, save);
+}
+
+// 인메모리 저장소 — 파일 없이 매번 새 시드로 시작한다(테스트 격리용).
+export function createMemoryDb() {
+  return makeDb(seed, () => {});
+}
+`,
+
+  // 미리보기용 백엔드 dev 서버(잠금) — 파일 백업 db 주입 + 요청 로깅 미들웨어로 학생 앱을
+  // 감싼다. 3000 포트를 열어 Vite proxy(/api → :3000)의 대상이 된다.
+  'server/index.js': `import express from 'express';
+import { createApp } from './app.js';
+import { createFileDb } from './db.js';
+
+// 파일 백업 DB — server/data/db.json에 저장된다(호스트가 watch해 'DB 상태'를 실시간 표시).
+const db = createFileDb('server/data/db.json');
+
+// 학생 앱을 감싸 요청/응답을 로깅한다(stdout → 호스트 'API 로그'). express.json은 로거가
+// 요청 바디를 읽도록 학생 앱보다 먼저 둔다(이중 파싱은 무해).
+const app = express();
+app.use(express.json());
+app.use(despyRequestLogger);
+app.use(createApp(db));
+
 const PORT = process.env.PORT || 3000;
-createApp().listen(PORT, () => {
+app.listen(PORT, () => {
   console.log('despy todo API listening on http://localhost:' + PORT);
 });
+
+// 요청 1건의 메서드/경로/상태/소요/요청·응답 바디를 센티넬 JSON 한 줄로 출력한다.
+// 호스트(useWorkspace)가 dev 출력에서 이 줄만 파싱해 'API 로그'로 보여준다.
+function despyRequestLogger(req, res, next) {
+  const started = Date.now();
+  let resBody;
+  const json = res.json.bind(res);
+  res.json = (payload) => {
+    resBody = payload;
+    return json(payload);
+  };
+  res.on('finish', () => {
+    const entry = {
+      method: req.method,
+      path: req.originalUrl || req.url,
+      status: res.statusCode,
+      durationMs: Date.now() - started,
+      reqBody: req.body && Object.keys(req.body).length ? req.body : undefined,
+      resBody,
+    };
+    try {
+      process.stdout.write('__DESPY_LOG__' + JSON.stringify(entry) + '__DESPY_LOG_END__\\n');
+    } catch {
+      /* 직렬화 불가한 응답은 로그를 건너뛴다 */
+    }
+  });
+  next();
+}
 `,
 
   // 백엔드 채점 계약(스펙) — node 환경(도크블록)에서 supertest로 HTTP 행동을 검증한다(잠금).
-  // GET 테스트는 스타터에서 통과하고, POST 테스트는 학생이 구현해야 통과한다(red→green).
+  // 각 테스트는 인메모리 db로 격리한다(파일 백업과 달리 상태가 섞이지 않는다).
   'server/app.test.js': `// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
+import { createMemoryDb } from './db.js';
+
+const makeApp = () => createApp(createMemoryDb());
 
 describe('Todo API (백엔드)', () => {
   it('GET /api/todos는 할 일 목록(배열)을 반환한다', async () => {
-    const res = await request(createApp()).get('/api/todos');
+    const res = await request(makeApp()).get('/api/todos');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
   });
 
   it('POST /api/todos는 새 할 일을 추가하고 201로 응답한다', async () => {
-    const res = await request(createApp())
+    const res = await request(makeApp())
       .post('/api/todos')
       .send({ title: '책 읽기' });
     expect(res.status).toBe(201);
@@ -643,7 +851,7 @@ describe('Todo API (백엔드)', () => {
   });
 
   it('POST 후 GET 목록에 추가한 항목이 포함된다', async () => {
-    const app = createApp();
+    const app = makeApp();
     await request(app).post('/api/todos').send({ title: '청소하기' });
     const res = await request(app).get('/api/todos');
     const titles = res.body.map((todo) => todo.title);
@@ -755,9 +963,9 @@ button:hover {
  * 풀스택 Todo 스타터에서 학생이 편집할 수 없는(read-only) 경로.
  *
  * 빌드/실행 설정(package.json·vite/vitest config·index.html·main.jsx), 백엔드 실행
- * 골격(server/index.js), 양쪽 채점 계약(src/App.test.jsx·server/app.test.js)을 잠그고,
- * 프론트 화면(src/App.jsx)·백엔드 라우트(server/app.js)·스타일(src/index.css)만
- * 편집 가능하게 한다. 채점 스펙을 잠가 무결성(테스트 변조 방지)을 지킨다.
+ * 골격+로깅(server/index.js)·저장소 모듈(server/db.js), 양쪽 채점 계약(src/App.test.jsx·
+ * server/app.test.js)을 잠그고, 프론트 화면(src/App.jsx)·백엔드 라우트(server/app.js)·
+ * 스타일(src/index.css)만 편집 가능하게 한다. 채점 스펙을 잠가 무결성을 지킨다.
  */
 export const FULLSTACK_TODO_LOCKED_PATHS: readonly string[] = [
   'package.json',
@@ -768,5 +976,6 @@ export const FULLSTACK_TODO_LOCKED_PATHS: readonly string[] = [
   'src/main.jsx',
   'src/App.test.jsx',
   'server/index.js',
+  'server/db.js',
   'server/app.test.js',
 ];
