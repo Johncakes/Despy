@@ -41,10 +41,11 @@ const StyledButton = styled.button<{ $variant: ButtonVariant }>`
     $variant === 'primary'
       ? css`
           background: ${theme.colors.primary};
-          color: ${theme.colors.background};
+          color: #ffffff;
           border: 1px solid ${theme.colors.primary};
           &:hover {
             background: ${theme.colors.primaryHover};
+            border-color: ${theme.colors.primaryHover};
           }
         `
       : css`
@@ -52,7 +53,7 @@ const StyledButton = styled.button<{ $variant: ButtonVariant }>`
           color: ${theme.colors.text};
           border: 1px solid ${theme.colors.border};
           &:hover {
-            background: ${theme.colors.surface};
+            background: ${theme.colors.surfaceAlt};
           }
         `}
 

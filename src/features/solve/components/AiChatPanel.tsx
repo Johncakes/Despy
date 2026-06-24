@@ -446,7 +446,7 @@ const Bubble = styled.div<{ $role: 'system' | 'user' | 'assistant' }>`
   background: ${({ theme, $role }) =>
     $role === 'user' ? theme.colors.primary : theme.colors.surfaceAlt};
   color: ${({ theme, $role }) =>
-    $role === 'user' ? theme.colors.background : theme.colors.text};
+    $role === 'user' ? '#ffffff' : theme.colors.text};
   border: 1px solid ${({ theme }) => theme.colors.border};
 `;
 

@@ -57,7 +57,11 @@ export function ChallengeAuthorView() {
           <List>
             {challenges.map((challenge) => (
               <ListItem key={challenge.id} $active={challenge.id === editingId}>
-                <ItemButton type="button" onClick={() => setEditingId(challenge.id)}>
+                <ItemButton
+                  type="button"
+                  $active={challenge.id === editingId}
+                  onClick={() => setEditingId(challenge.id)}
+                >
                   {challenge.title || '(제목 없음)'}
                 </ItemButton>
                 <SolveLink href={`/workspace/${challenge.id}`}>풀기 →</SolveLink>
@@ -117,7 +121,7 @@ const List = styled.ul`
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.xs};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const ListItem = styled.li<{ $active: boolean }>`
@@ -126,22 +130,32 @@ const ListItem = styled.li<{ $active: boolean }>`
   justify-content: space-between;
   gap: ${({ theme }) => theme.spacing.sm};
   padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
-  border-radius: ${({ theme }) => theme.radius.sm};
+  border-radius: ${({ theme }) => theme.radius.md};
   background: ${({ theme, $active }) =>
-    $active ? theme.colors.surfaceAlt : 'transparent'};
+    $active ? `${theme.colors.primary}0a` : theme.colors.surfaceAlt};
   border: 1px solid
-    ${({ theme, $active }) => ($active ? theme.colors.primary : 'transparent')};
+    ${({ theme, $active }) => ($active ? theme.colors.primary : theme.colors.border)};
+  transition: all 0.15s ease;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary};
+    background: ${({ theme, $active }) =>
+      $active ? `${theme.colors.primary}0f` : theme.colors.surface};
+  }
 `;
 
-const ItemButton = styled.button`
+const ItemButton = styled.button<{ $active?: boolean }>`
   flex: 1;
   text-align: left;
   background: none;
   border: none;
   color: ${({ theme }) => theme.colors.text};
   font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme, $active }) =>
+    $active ? theme.font.weightBold : theme.font.weightRegular};
   cursor: pointer;
   padding: 0;
+  font-family: inherit;
 `;
 
 const SolveLink = styled(Link)`

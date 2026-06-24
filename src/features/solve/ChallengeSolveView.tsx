@@ -368,13 +368,18 @@ const Wrapper = styled.div`
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const TopBar = styled.header`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
+  flex-shrink: 0;
 `;
 
 const BackButton = styled.button`
@@ -428,7 +433,7 @@ const Body = styled.div`
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const StatementColumn = styled.div`
@@ -458,7 +463,7 @@ const WorkspaceColumn = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const EditorArea = styled.div`

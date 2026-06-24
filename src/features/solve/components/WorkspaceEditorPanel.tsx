@@ -111,7 +111,7 @@ export function WorkspaceEditorPanel({
         <EditorHost>
           <MonacoEditor
             height="100%"
-            theme="vs-dark"
+            theme="vs"
             path={activePath}
             language={monacoLanguageForPath(activePath)}
             value={files[activePath] ?? ''}

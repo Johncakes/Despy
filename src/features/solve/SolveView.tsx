@@ -218,13 +218,18 @@ const Wrapper = styled.div`
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const TopBar = styled.header`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
+  flex-shrink: 0;
 `;
 
 const BackLink = styled(Link)`
@@ -242,7 +247,7 @@ const Body = styled.div`
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const ProblemColumn = styled.div`
@@ -272,7 +277,7 @@ const CodeColumn = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const EditorArea = styled.div`
