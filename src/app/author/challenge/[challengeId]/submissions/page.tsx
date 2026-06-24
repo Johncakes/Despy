@@ -5,8 +5,6 @@
  * localStorage 기반 challengeStore에서 오므로 마운트 이후에 조회한다. 과제를 찾지
  * 못하면 안내 + 출제 화면 링크를 보여준다. 라우팅 진입점 역할만 한다.
  *
- * (제출 영속·집계는 후속 단계 — 현재 대시보드는 진입점 스캐폴드다. §13)
- *
  * 사용처: Next.js App Router '/author/challenge/[challengeId]/submissions' 경로
  */
 'use client';
@@ -16,7 +14,7 @@ import { useParams } from 'next/navigation';
 import styled from 'styled-components';
 import { useChallengeStore } from '@/shared/core/stores/challengeStore';
 import { useHasMounted } from '@/shared/lib/hooks/useHasMounted';
-import { PageShell } from '@/shared/components/ui/PageShell';
+import { Navbar } from '@/shared/components/ui/Navbar';
 import { GradingDashboardView } from '@/features/author/GradingDashboardView';
 
 export default function GradingDashboardPage() {
@@ -28,31 +26,57 @@ export default function GradingDashboardPage() {
 
   if (!hasMounted) {
     return (
-      <PageShell>
-        <Notice>불러오는 중…</Notice>
-      </PageShell>
+      <DesktopWrapper>
+        <Navbar activeTitle="채점 현황" />
+        <ContentContainer>
+          <Notice>불러오는 중…</Notice>
+        </ContentContainer>
+      </DesktopWrapper>
     );
   }
 
   if (!challenge) {
     return (
-      <PageShell>
-        <Notice>
-          과제를 찾을 수 없습니다. <Link href="/author/challenge">과제 출제로 돌아가기</Link>
-        </Notice>
-      </PageShell>
+      <DesktopWrapper>
+        <Navbar activeTitle="채점 현황" />
+        <ContentContainer>
+          <Notice>
+            문제를 찾을 수 없습니다. <Link href="/author">문제 출제로 돌아가기</Link>
+          </Notice>
+        </ContentContainer>
+      </DesktopWrapper>
     );
   }
 
   return (
-    <PageShell>
-      <GradingDashboardView challenge={challenge} />
-    </PageShell>
+    <DesktopWrapper>
+      <Navbar activeTitle="채점 현황" />
+      <ContentContainer>
+        <GradingDashboardView challenge={challenge} />
+      </ContentContainer>
+    </DesktopWrapper>
   );
 }
 
+const DesktopWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  background: ${({ theme }) => theme.colors.background};
+`;
+
+const ContentContainer = styled.div`
+  flex: 1;
+  min-height: 0;
+  padding: ${({ theme }) => theme.spacing.md};
+  display: flex;
+  flex-direction: column;
+`;
+
 const Notice = styled.p`
   color: ${({ theme }) => theme.colors.textMuted};
+  padding: ${({ theme }) => theme.spacing.md};
 
   a {
     color: ${({ theme }) => theme.colors.primary};

@@ -98,7 +98,6 @@ export function AdminUsersView() {
 // ── Styled Components ─────────────────────────────────────────────────────
 
 const Main = styled.main`
-  min-height: 100vh;
   max-width: 720px;
   margin: 0 auto;
   padding: ${({ theme }) => theme.spacing.xl};

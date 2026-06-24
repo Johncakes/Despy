@@ -68,8 +68,6 @@ export function WorkspacePlaygroundView() {
   return (
     <Wrapper>
       <TopBar>
-        <BackLink href="/">← 홈</BackLink>
-        <Title>WebContainer PoC</Title>
         <Caption>편집 → FS → HMR 미리보기 (P1)</Caption>
         <Spacer />
         <Button variant="ghost" onClick={handleAiMirrorDemo} disabled={workspace.phase !== 'ready'}>
@@ -130,18 +128,8 @@ const Wrapper = styled.div`
 
 const TopBar = styled.header`
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: ${({ theme }) => theme.spacing.md};
-`;
-
-const BackLink = styled(Link)`
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-const Title = styled.h1`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.sizeLg};
 `;
 
 const Caption = styled.span`

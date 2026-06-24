@@ -1,31 +1,40 @@
-/**
- * page.tsx (/author/challenge) — 교수 과제 출제 화면 진입점 (WebContainer 피벗)
- *
- * ChallengeAuthorView를 전체 높이 셸 안에 렌더한다. 과제 데이터는 localStorage
- * 기반 challengeStore에서 오므로 마운트 이후에 렌더한다(hydration mismatch 방지).
- * 라우팅 진입점 역할만 하고 로직은 feature(ChallengeAuthorView)에 둔다.
- *
- * (구 /author는 알고리즘 출제 화면으로 유지 — 피벗 완료 후 P5에서 정리.)
- *
- * 사용처: Next.js App Router '/author/challenge' 경로
- */
 'use client';
 
 import styled from 'styled-components';
-import { ChallengeAuthorView } from '@/features/author/ChallengeAuthorView';
-import { PageShell } from '@/shared/components/ui/PageShell';
+import { CombinedAuthorView } from '@/features/author/CombinedAuthorView';
+import { Navbar } from '@/shared/components/ui/Navbar';
 import { useHasMounted } from '@/shared/lib/hooks/useHasMounted';
 
 export default function ChallengeAuthorPage() {
   const hasMounted = useHasMounted();
 
   return (
-    <PageShell>
-      {hasMounted ? <ChallengeAuthorView /> : <Loading>불러오는 중…</Loading>}
-    </PageShell>
+    <DesktopWrapper>
+      <Navbar activeTitle="출제 관리" />
+      <ContentContainer>
+        {hasMounted ? <CombinedAuthorView /> : <Loading>불러오는 중…</Loading>}
+      </ContentContainer>
+    </DesktopWrapper>
   );
 }
 
+const DesktopWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  background: ${({ theme }) => theme.colors.background};
+`;
+
+const ContentContainer = styled.div`
+  flex: 1;
+  min-height: 0;
+  padding: ${({ theme }) => theme.spacing.md};
+  display: flex;
+  flex-direction: column;
+`;
+
 const Loading = styled.div`
   color: ${({ theme }) => theme.colors.textMuted};
+  padding: ${({ theme }) => theme.spacing.md};
 `;

@@ -19,6 +19,7 @@ import { useSolveSessionStore } from '@/shared/core/stores/solveSessionStore';
 import { useSolveHistoryStore } from '@/shared/core/stores/solveHistoryStore';
 import { useSubmissionStore } from '@/shared/core/stores/submissionStore';
 import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
+import { Navbar } from '@/shared/components/ui/Navbar';
 import type { GradingResult, Problem, UserRole } from '@/shared/core/types';
 import type { SolveSession } from '@/shared/core/stores/solveSessionStore';
 import type { StoredSubmission } from '@/shared/core/stores/submissionStore';
@@ -236,101 +237,95 @@ export function MyPageView() {
   const totalTokens = totalAlgoTokens + totalChallengeTokens;
 
   return (
-    <Main>
-      <PageHeader>
-        <BackLink href="/">← 홈</BackLink>
-        <PageTitle>마이페이지</PageTitle>
-        {currentUser && (
-          <UserInfo>
-            {currentUser.name}
-            <RoleTag>{roleLabel(currentUser.role)}</RoleTag>
-          </UserInfo>
-        )}
-      </PageHeader>
+    <DesktopWrapper>
+      <Navbar activeTitle="마이페이지" />
+      <ContentContainer>
+        <Main>
+          {!hasMounted ? (
+            <LoadingMsg>불러오는 중…</LoadingMsg>
+          ) : (
+            <>
+              <StatBar>
+                <StatCard>
+                  <StatValue>
+                    {triedCount}
+                    <StatSub>/{problems.length}</StatSub>
+                  </StatValue>
+                  <StatLabel>알고리즘 시도</StatLabel>
+                </StatCard>
+                <StatCard $highlight="success">
+                  <StatValue $tone="success">{passedCount}</StatValue>
+                  <StatLabel>완전 통과</StatLabel>
+                </StatCard>
+                <StatCard>
+                  <StatValue>{totalSubmissions}</StatValue>
+                  <StatLabel>
+                    웹 문제 제출
+                    {avgScore !== null && (
+                      <StatSubLabel> · 평균 {avgScore.toFixed(0)}점</StatSubLabel>
+                    )}
+                  </StatLabel>
+                </StatCard>
+                <StatCard>
+                  <StatValue>{totalQuestions}회</StatValue>
+                  <StatLabel>AI 질문 · {formatTokens(totalTokens)} 토큰</StatLabel>
+                </StatCard>
+              </StatBar>
 
-      {!hasMounted ? (
-        <LoadingMsg>불러오는 중…</LoadingMsg>
-      ) : (
-        <>
-          <StatBar>
-            <StatCard>
-              <StatValue>
-                {triedCount}
-                <StatSub>/{problems.length}</StatSub>
-              </StatValue>
-              <StatLabel>알고리즘 시도</StatLabel>
-            </StatCard>
-            <StatCard $highlight="success">
-              <StatValue $tone="success">{passedCount}</StatValue>
-              <StatLabel>완전 통과</StatLabel>
-            </StatCard>
-            <StatCard>
-              <StatValue>{totalSubmissions}</StatValue>
-              <StatLabel>
-                과제 제출
-                {avgScore !== null && (
-                  <StatSubLabel> · 평균 {avgScore.toFixed(0)}점</StatSubLabel>
+              <Section>
+                <SectionTitle>
+                  알고리즘 문제
+                  <SectionCount>{problems.length}개</SectionCount>
+                </SectionTitle>
+                {problems.length === 0 ? (
+                  <EmptyMsg>출제된 알고리즘 문제가 없습니다.</EmptyMsg>
+                ) : (
+                  <ProblemGrid>
+                    {sortedProblems.map(({ problem, session, result }) => (
+                      <ProblemCard
+                        key={problem.id}
+                        problem={problem}
+                        session={session}
+                        result={result}
+                      />
+                    ))}
+                  </ProblemGrid>
                 )}
-              </StatLabel>
-            </StatCard>
-            <StatCard>
-              <StatValue>{totalQuestions}회</StatValue>
-              <StatLabel>AI 질문 · {formatTokens(totalTokens)} 토큰</StatLabel>
-            </StatCard>
-          </StatBar>
+              </Section>
 
-          <Section>
-            <SectionTitle>
-              알고리즘 문제
-              <SectionCount>{problems.length}개</SectionCount>
-            </SectionTitle>
-            {problems.length === 0 ? (
-              <EmptyMsg>출제된 알고리즘 문제가 없습니다.</EmptyMsg>
-            ) : (
-              <ProblemGrid>
-                {sortedProblems.map(({ problem, session, result }) => (
-                  <ProblemCard
-                    key={problem.id}
-                    problem={problem}
-                    session={session}
-                    result={result}
-                  />
-                ))}
-              </ProblemGrid>
-            )}
-          </Section>
-
-          <Section>
-            <SectionTitle>
-              과제 제출 이력
-              <SectionCount>{totalSubmissions}건</SectionCount>
-            </SectionTitle>
-            {allSubmissionEntries.length === 0 ? (
-              <EmptyMsg>제출한 과제가 없습니다.</EmptyMsg>
-            ) : (
-              <SubmissionTable>
-                <SubHeader>
-                  <span>과제</span>
-                  <span>점수</span>
-                  <span>테스트</span>
-                  <span>제출 정보</span>
-                </SubHeader>
-                {allSubmissionEntries.map(({ challengeId, submission }) => (
-                  <SubmissionRow
-                    key={submission.id}
-                    challengeTitle={
-                      challengeMap[challengeId]?.title ?? `(삭제된 과제)`
-                    }
-                    challengeId={challengeId}
-                    submission={submission}
-                  />
-                ))}
-              </SubmissionTable>
-            )}
-          </Section>
-        </>
-      )}
-    </Main>
+              <Section>
+                <SectionTitle>
+                  웹 문제 제출 이력
+                  <SectionCount>{totalSubmissions}건</SectionCount>
+                </SectionTitle>
+                {allSubmissionEntries.length === 0 ? (
+                  <EmptyMsg>제출한 웹 문제가 없습니다.</EmptyMsg>
+                ) : (
+                  <SubmissionTable>
+                    <SubHeader>
+                      <span>문제</span>
+                      <span>점수</span>
+                      <span>테스트</span>
+                      <span>제출 정보</span>
+                    </SubHeader>
+                    {allSubmissionEntries.map(({ challengeId, submission }) => (
+                      <SubmissionRow
+                        key={submission.id}
+                        challengeTitle={
+                          challengeMap[challengeId]?.title ?? `(삭제된 문제)`
+                        }
+                        challengeId={challengeId}
+                        submission={submission}
+                      />
+                    ))}
+                  </SubmissionTable>
+                )}
+              </Section>
+            </>
+          )}
+        </Main>
+      </ContentContainer>
+    </DesktopWrapper>
   );
 }
 
@@ -633,4 +628,18 @@ const SubMeta = styled.div`
   font-size: ${({ theme }) => theme.font.sizeXs};
   color: ${({ theme }) => theme.colors.textMuted};
   flex-wrap: wrap;
+`;
+
+const DesktopWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  background: ${({ theme }) => theme.colors.background};
+`;
+
+const ContentContainer = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 `;

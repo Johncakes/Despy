@@ -263,7 +263,7 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
     <Layout>
       <Header>
         <HeaderTop>
-          <BackLink href="/author/challenge">← 과제 출제로 돌아가기</BackLink>
+          <BackLink href="/author">← 문제 출제로 돌아가기</BackLink>
           <Button variant="ghost" onClick={() => setIsCriteriaOpen(true)}>
             채점 기준 보기
           </Button>
