@@ -24,6 +24,7 @@ import type {
   ApiConsoleConfig,
   ApiConsoleRequest,
   ApiConsoleResponse,
+  ApiLogEntry,
   AutoTestResult,
   ProjectFiles,
 } from '@/shared/core/types';
@@ -40,6 +41,7 @@ import {
   runCommand,
   sendHttpRequest,
   startDevServer,
+  watchContainerFile,
 } from '@/shared/lib/webcontainer/runtime';
 import {
   createFileSync,

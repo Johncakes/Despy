@@ -30,6 +30,7 @@ import {
   type DiffLineType,
   type FileDiff,
 } from '@/shared/lib/utils/lineDiff';
+import { parseSearchReplaceEdits } from '@/shared/lib/utils/markdownCode';
 import { Button } from '@/shared/components/ui/Button';
 import { Modal } from '@/shared/components/ui/Modal';
 import { Markdown } from '@/shared/components/ui/Markdown';
@@ -580,7 +581,7 @@ function SubmissionDetail({
                     </ChatRole>
                     <ChatBubble $role={turn.role}>
                       {turn.role === 'assistant' ? (
-                        <Markdown>{turn.text || '(빈 응답)'}</Markdown>
+                        <AiMessageBody text={turn.text} />
                       ) : (
                         <PromptText>{turn.text || '(빈 프롬프트)'}</PromptText>
                       )}
@@ -655,6 +656,59 @@ function SubmissionDetail({
       </TabPanel>
     </DetailLayout>
   );
+}
+
+// ── AI 응답 본문(대화 탭) ─────────────────────────────────────────────────────
+
+/**
+ * AI 응답을 깔끔하게 렌더한다 — 설명(prose)은 Markdown으로, SEARCH/REPLACE 편집
+ * 블록은 파일별 "교체 코드" 카드로 분리한다. 원문에 그대로 박혀 보기 어수선하던
+ * `<<<<<<< SEARCH … >>>>>>> REPLACE` 마커·중복 원본을 정리해 교수가 읽기 쉽게 한다.
+ * (교체 전 코드는 기본 접어두고 필요 시 펼친다.)
+ */
+function AiMessageBody({ text }: { text: string }) {
+  const edits = parseSearchReplaceEdits(text);
+  if (edits.length === 0) {
+    return <Markdown>{text || '(빈 응답)'}</Markdown>;
+  }
+
+  const prose = stripEditBlocks(text);
+  return (
+    <>
+      {prose && <Markdown>{prose}</Markdown>}
+      <EditCardList>
+        {edits.map((edit, index) => (
+          <EditCard key={index}>
+            <EditCardHead>
+              <CodePath>{edit.path ?? '코드 편집'}</CodePath>
+              <EditTag>교체 제안</EditTag>
+            </EditCardHead>
+            <CodeBlock>{edit.replace || '(빈 코드)'}</CodeBlock>
+            {edit.search.trim() && (
+              <OldCodeDetails>
+                <DetailSummary>교체 전 코드 보기</DetailSummary>
+                <CodeBlock>{edit.search}</CodeBlock>
+              </OldCodeDetails>
+            )}
+          </EditCard>
+        ))}
+      </EditCardList>
+    </>
+  );
+}
+
+/** AI 응답에서 SEARCH/REPLACE 편집(펜스 포함)을 제거해 설명 텍스트만 남긴다. */
+function stripEditBlocks(text: string): string {
+  return text
+    // SEARCH 마커를 담은 코드 펜스 블록 제거(일반 코드블록은 보존).
+    .replace(/```[^\n]*\n[\s\S]*?```/g, (block) =>
+      /<{3,}\s*SEARCH/.test(block) ? '' : block,
+    )
+    // 펜스 없이 박힌 SEARCH/REPLACE 영역도 제거(폴백).
+    .replace(/<{3,}\s*SEARCH[\s\S]*?>{3,}\s*REPLACE/g, '')
+    // 블록 제거로 생긴 과한 빈 줄 정리.
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1229,6 +1283,46 @@ const PromptText = styled.p`
   color: ${({ theme }) => theme.colors.text};
   white-space: pre-wrap;
   word-break: break-word;
+`;
+
+// AI가 제안한 코드 편집(SEARCH/REPLACE) — 파일별 "교체 코드" 카드로 정리.
+const EditCardList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-top: ${({ theme }) => theme.spacing.sm};
+`;
+
+const EditCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+`;
+
+const EditCardHead = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const EditTag = styled.span`
+  padding: 1px ${({ theme }) => theme.spacing.sm};
+  font-size: 10px;
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.info};
+  border: 1px solid ${({ theme }) => theme.colors.info};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  white-space: nowrap;
+`;
+
+const OldCodeDetails = styled.details`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
 `;
 
 // 풀이 타임라인 — 프롬프트(스텝)를 세로로 쌓는다.

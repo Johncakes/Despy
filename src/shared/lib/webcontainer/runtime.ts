@@ -304,6 +304,35 @@ export async function installPreviewConsoleBridge(): Promise<void> {
   await container.setPreviewScript(PREVIEW_CONSOLE_SCRIPT);
 }
 
+/** 컨테이너 FS에서 파일을 읽어 문자열로 반환한다. 없거나 읽기 실패면 null. */
+export async function readContainerFile(path: string): Promise<string | null> {
+  const container = await bootWebContainer();
+  return readFileOrNull(container, path);
+}
+
+/**
+ * 컨테이너 파일 변화를 구독한다('DB 상태' 라이브 뷰용 — db.json watch).
+ *
+ * 구독 즉시 현재 내용을 1회 onChange로 알리고(watch는 변경분만 알림), 이후 파일이 바뀔
+ * 때마다 최신 내용(없으면 null)을 전달한다. 반환한 함수로 구독을 해제한다. watch 설치가
+ * 실패해도(파일 부재 등) 초기 1회 읽기는 보장하고 no-op 해제 함수를 돌려준다.
+ */
+export async function watchContainerFile(
+  path: string,
+  onChange: (content: string | null) => void,
+): Promise<() => void> {
+  const container = await bootWebContainer();
+  onChange(await readFileOrNull(container, path));
+  try {
+    const watcher = container.fs.watch(path, () => {
+      void readFileOrNull(container, path).then(onChange);
+    });
+    return () => watcher.close();
+  } catch {
+    return () => {};
+  }
+}
+
 /**
  * 컨테이너 안에서 백엔드(localhost:port)로 HTTP 요청을 한 번 보내고 결과를 반환한다.
  *
@@ -391,6 +420,18 @@ export function teardownWebContainer(): void {
 }
 
 // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
+
+/** 파일을 utf-8로 읽어 반환하고, 없거나 실패하면 null(throw하지 않음). */
+async function readFileOrNull(
+  container: WebContainer,
+  path: string,
+): Promise<string | null> {
+  try {
+    return await container.fs.readFile(path, 'utf-8');
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 평면 경로 맵(`{ 'src/App.jsx': '...' }`)을 WebContainer FileSystemTree

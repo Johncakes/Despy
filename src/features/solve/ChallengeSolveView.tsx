@@ -333,6 +333,8 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               isRunningTests={workspace.isRunningTests}
               testErrorMessage={workspace.testErrorMessage}
               onRunTests={() => void workspace.runTests()}
+              consoleEntries={workspace.consoleEntries}
+              onClearConsole={workspace.clearConsole}
               apiConsole={workspace.apiConsole}
               onSendApiRequest={workspace.sendApiRequest}
             />

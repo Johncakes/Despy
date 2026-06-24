@@ -168,6 +168,32 @@ export interface ApiConsoleConfig {
   defaultPath: string;
   /** 미리보기(프론트)가 없어 콘솔이 주 화면인지(백엔드 단독 → true). */
   isPrimaryView: boolean;
+  /**
+   * DB 상태 뷰가 watch할 저장소 파일 경로(컨테이너 루트 상대, 예: 'server/data/db.json').
+   * 백엔드 템플릿이 파일 백업 db를 쓸 때만 주어진다. 없으면 DB 탭을 숨긴다.
+   */
+  dbFilePath?: string;
+}
+
+/**
+ * 백엔드가 처리한 HTTP 요청 1건의 실시간 로그(API 로그 패널 표시용).
+ *
+ * 잠긴 서버 진입점에 주입된 로깅 미들웨어가 매 요청을 센티넬 JSON으로 stdout에 출력하고,
+ * useWorkspace가 dev 출력 스트림에서 그 줄을 파싱해 만든다. 콘솔 수동 요청뿐 아니라
+ * 프론트(풀스택)가 보낸 요청까지 모두 잡힌다.
+ */
+export interface ApiLogEntry {
+  /** 클라이언트가 부여하는 고유 id(렌더 key·정렬용 — 서버가 아니라 호스트가 채운다). */
+  id: number;
+  method: string;
+  path: string;
+  status: number;
+  /** 서버 처리 소요(ms). */
+  durationMs: number;
+  /** 요청 바디(파싱된 값, 없으면 생략). */
+  reqBody?: unknown;
+  /** 응답 바디(직렬화된 값, 없으면 생략). */
+  resBody?: unknown;
 }
 
 /**
