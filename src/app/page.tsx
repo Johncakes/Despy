@@ -25,9 +25,14 @@ export default function HomePage() {
       <Header>
         <Title>despy</Title>
         <Subtitle>에이전틱 코딩 평가 시스템 — 통제된 AI로 알고리즘 문제 풀기</Subtitle>
-        <Link href="/author">
-          <Button variant="primary">교수 모드 — 문제 출제</Button>
-        </Link>
+        <HeaderActions>
+          <Link href="/author">
+            <Button variant="primary">교수 모드 — 문제 출제</Button>
+          </Link>
+          <Link href="/playground">
+            <Button variant="ghost">WebContainer PoC →</Button>
+          </Link>
+        </HeaderActions>
       </Header>
 
       <ListWrap>
@@ -81,6 +86,12 @@ const Title = styled.h1`
 const Subtitle = styled.p`
   margin: 0 0 ${({ theme }) => theme.spacing.sm};
   color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const HeaderActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
 `;
 
 const ListWrap = styled.div`

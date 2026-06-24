@@ -9,6 +9,19 @@
  * 사용처: features/*, shared/* 전반 (`@/shared/core/types`)
  */
 
+// ── 워크스페이스 (WebContainer) ─────────────────────────────────────────────
+
+/**
+ * WebContainer가 mount하는 프로젝트 파일트리.
+ *
+ * 경로→파일 내용의 평면 맵으로 보관하고(`{ 'src/App.jsx': '...', 'package.json': '...' }`),
+ * 런타임(`shared/lib/webcontainer/runtime.ts`)에서 WebContainer의 중첩 구조
+ * (FileSystemTree)로 변환해 mount한다. 평면 맵이 출제·편집·diff에 다루기 쉽다.
+ *
+ * (docs/spec-webcontainer.md §4.1)
+ */
+export type ProjectFiles = Record<string, string>;
+
 // ── 언어 ────────────────────────────────────────────────────────────────
 
 /**

@@ -55,6 +55,9 @@ npm run test         # vitest 실행
 - **배포**: 미정 (Judge0는 Docker 기반 별도 배포 필요 — `docker-compose.judge0.yml`)
 - **기술 스택**: Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query
   · Monaco Editor(`@monaco-editor/react`) · Vercel AI SDK(`ai` + `@ai-sdk/google`, Gemini) · react-markdown
+  · **WebContainer**(`@webcontainer/api`, 브라우저 내 Node 런타임 — 피벗 P0~)
+  - ⚠️ WebContainer는 cross-origin isolation이 필수라 `next.config.ts`가 모든 응답에
+    COOP(`same-origin`)+COEP(`require-corp`) 헤더를 주입한다. 새 외부 CDN/폰트 도입 시 CORP/CORS 점검 필수.
   - _(MongoDB는 지양 — 위 「아키텍처 방향」 참조. 현재 코드 미사용. 도입 시 별도 논의)_
 
 ---
@@ -69,6 +72,7 @@ src/
 │   ├── page.tsx                  홈 (역할 진입 + 문제 목록)
 │   ├── author/page.tsx           교수 출제 화면 진입점
 │   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점
+│   ├── playground/page.tsx       WebContainer P0 PoC 진입점 (신규 — spec-webcontainer.md)
 │   └── api/                      유일한 백엔드 (키 은닉·프록시)
 │       ├── agent/route.ts        AI 프록시 (Gemini, 스트리밍 + 토큰 usage)
 │       └── judge/route.ts        채점 프록시 (Judge0 + 모의 채점 폴백)
@@ -78,16 +82,20 @@ src/
 │   │                             AiPolicyFields, useProblemDraft
 │   └── solve/                    학생: SolveView, ProblemPanel, CodeEditorPanel,
 │                                 AiChatPanel, GradingResultPanel
+│                                 + (P0 신규) WorkspacePlaygroundView, useWorkspace,
+│                                   components/WorkspacePanel (WebContainer 워크스페이스)
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
     │   ├── api/                  judgeApi.ts (채점 fetch 격리)
     │   ├── stores/               problemStore.ts, solveSessionStore.ts (Zustand persist)
     │   ├── queries/              judgeQueries.ts (채점 mutation), queryKeys.ts
-    │   ├── types/                index.ts (Problem, AiPolicy, TestCase, GradingResult …)
-    │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleProblems.ts
+    │   ├── types/                index.ts (Problem, AiPolicy, TestCase, GradingResult, ProjectFiles …)
+    │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleProblems.ts,
+    │                             webcontainerTemplates.ts (P0 신규 — 샘플 Vite+React 트리)
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
+    │   ├── webcontainer/         runtime.ts (P0 신규 — WebContainer 싱글턴 부팅·mount·spawn 래퍼)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트
