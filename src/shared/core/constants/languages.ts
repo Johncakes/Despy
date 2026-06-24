@@ -1,11 +1,11 @@
 /**
  * languages.ts — 지원 프로그래밍 언어 목록 (단일 출처)
  *
- * Judge0 채점(language_id)과 Monaco 에디터(언어 모드), 초기 코드 스니펫을 한곳에
- * 모은다. 문제의 allowedLanguageIds는 여기 정의된 id를 참조한다.
- * Judge0 CE의 기본 language_id 기준이며, 채점 서버 구성에 따라 조정될 수 있다.
+ * Monaco 에디터(언어 모드)와 초기 코드 스니펫, AI 채점 맥락용 표시명을 한곳에 모은다.
+ * 문제의 allowedLanguageIds는 여기 정의된 id를 참조한다. 채점은 코드 실행이 아니라
+ * AI 정성 판정이므로(P5) 언어별 실행 식별자는 더 이상 필요하지 않다.
  *
- * 사용처: 에디터 언어 선택, 채점 요청(judge0Id), Monaco 모드 지정
+ * 사용처: 에디터 언어 선택, AI 채점 맥락, Monaco 모드 지정
  */
 import type { SupportedLanguage } from '@/shared/core/types';
 
@@ -13,14 +13,12 @@ export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
   {
     id: 'python',
     label: 'Python 3',
-    judge0Id: 71, // Judge0 CE: Python (3.8.1)
     monacoLanguage: 'python',
     defaultCode: ['import sys', '', 'def solve():', '    pass', '', 'solve()', ''].join('\n'),
   },
   {
     id: 'javascript',
     label: 'JavaScript (Node)',
-    judge0Id: 63, // Judge0 CE: JavaScript (Node.js 12.14.0)
     monacoLanguage: 'javascript',
     defaultCode: [
       "const input = require('fs').readFileSync(0, 'utf8').trim();",
@@ -36,7 +34,6 @@ export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
   {
     id: 'cpp',
     label: 'C++ (GCC)',
-    judge0Id: 54, // Judge0 CE: C++ (GCC 9.2.0)
     monacoLanguage: 'cpp',
     defaultCode: [
       '#include <bits/stdc++.h>',
@@ -53,7 +50,6 @@ export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
   {
     id: 'java',
     label: 'Java',
-    judge0Id: 62, // Judge0 CE: Java (OpenJDK 13.0.1)
     monacoLanguage: 'java',
     defaultCode: [
       'import java.util.*;',

@@ -1,8 +1,9 @@
 /**
  * GradingResultPanel.tsx — 채점 결과 패널
  *
- * 제출/예제 실행 결과를 보여준다: 통과 수 요약, 모의 채점 여부 배너, 케이스별
- * 상태와 (공개 케이스는) 입력/기대/실제 출력. 표시 전용으로 result/상태만 받는다.
+ * 제출/예제 실행 결과를 보여준다: 통과 수 요약, AI 채점 안내 배너, 케이스별 상태와
+ * (공개 케이스는) 입력/기대/AI 추정 출력·판단 근거, 종합 피드백. 채점은 코드 실행이
+ * 아닌 AI 정성 판정이므로(P5) 출력은 추정값임을 명시한다. 표시 전용으로 result/상태만 받는다.
  *
  * 사용처: features/solve/SolveView
  */
@@ -62,9 +63,7 @@ export function GradingResultPanel({
         <Badge tone={allPassed ? 'success' : 'danger'}>
           {result.passedCount} / {result.totalCount} 통과
         </Badge>
-        {result.isMock && (
-          <Badge tone="warning">모의 채점 (실제 실행 아님)</Badge>
-        )}
+        <Badge tone="warning">AI 채점 (코드 실행이 아닌 정성 판정)</Badge>
       </Summary>
 
       <CaseList>
@@ -80,9 +79,17 @@ export function GradingResultPanel({
               </Badge>
             </CaseHeader>
             {caseResult.isPublic && <CaseDetail result={caseResult} />}
+            {caseResult.reason && <Reason>{caseResult.reason}</Reason>}
           </CaseRow>
         ))}
       </CaseList>
+
+      {result.feedback && (
+        <Feedback>
+          <FeedbackLabel>종합 피드백</FeedbackLabel>
+          <FeedbackText>{result.feedback}</FeedbackText>
+        </Feedback>
+      )}
     </Wrapper>
   );
 }
@@ -101,7 +108,7 @@ function CaseDetail({ result }: { result: TestCaseResult }) {
         <Pre>{result.expectedOutput ?? ''}</Pre>
       </DetailCol>
       <DetailCol>
-        <DetailLabel>실제 출력</DetailLabel>
+        <DetailLabel>AI 추정 출력</DetailLabel>
         <Pre>{result.actualOutput ?? ''}</Pre>
       </DetailCol>
       {result.stderr && (
@@ -161,6 +168,12 @@ const CaseHeader = styled.div`
   justify-content: space-between;
 `;
 
+const Reason = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
 const CaseName = styled.span`
   font-size: ${({ theme }) => theme.font.sizeSm};
   font-weight: ${({ theme }) => theme.font.weightBold};
@@ -169,6 +182,28 @@ const CaseName = styled.span`
 const Hidden = styled.span`
   font-weight: ${({ theme }) => theme.font.weightRegular};
   color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const Feedback = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+`;
+
+const FeedbackLabel = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const FeedbackText = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  white-space: pre-wrap;
+  word-break: break-word;
 `;
 
 const DetailGrid = styled.div`

@@ -27,6 +27,8 @@ import {
 } from '@/shared/core/stores/workspaceStore';
 import {
   bootWebContainer,
+  isContainerBooted,
+  killDevServer,
   mountProjectFiles,
   runCommand,
   startDevServer,
@@ -264,8 +266,14 @@ export function useWorkspace(
 
   const start = useCallback(async () => {
     try {
-      // 영속된 세션이 있으면 템플릿 대비 변경분을 병합해 복원한다(§9.1). 복원된 파일은
-      // mount 대상이자 에디터 버퍼가 되어 미리보기가 저장된 작업 상태를 반영한다.
+      // 재진입 여부를 확인한다 — 재진입이면 WebContainer가 이미 살아 있으므로
+      // 부팅·npm install을 건너뛰고 dev 서버만 재시작해 빠르게 워크스페이스를 복구한다.
+      const isReentry = isContainerBooted();
+      if (isReentry) {
+        killDevServer();
+      }
+
+      // 세션을 resetSession으로 이미 지웠으므로 restored는 항상 undefined(undefined=템플릿).
       const restored = challengeId ? getWorkspaceSession(challengeId) : undefined;
       const restoredDelta = restored?.fileDelta ?? {};
       const initialFiles =
@@ -276,24 +284,27 @@ export function useWorkspace(
         setFiles(initialFiles);
         filesRef.current = initialFiles;
       }
-      // 복원된 활성 파일이 현재 파일트리에 존재하면 그 파일을 연다(없으면 기본 유지).
       if (restored?.activePath && initialFiles[restored.activePath] !== undefined) {
         setActivePathState(restored.activePath);
       }
 
-      setPhase('booting');
-      appendLog('[despy] WebContainer 부팅 중…\n');
+      if (!isReentry) {
+        setPhase('booting');
+        appendLog('[despy] WebContainer 부팅 중…\n');
+      }
       await bootWebContainer();
 
       setPhase('mounting');
       appendLog('[despy] 프로젝트 파일 mount 중…\n');
       await mountProjectFiles(initialFiles);
 
-      setPhase('installing');
-      appendLog('[despy] npm install 실행 중… (최초 1회는 수십 초 걸릴 수 있습니다)\n');
-      const installExitCode = await runCommand('npm', ['install'], appendLog);
-      if (installExitCode !== 0) {
-        throw new Error(`npm install 실패 (exit ${installExitCode}).`);
+      if (!isReentry) {
+        setPhase('installing');
+        appendLog('[despy] npm install 실행 중… (최초 1회는 수십 초 걸릴 수 있습니다)\n');
+        const installExitCode = await runCommand('npm', ['install'], appendLog);
+        if (installExitCode !== 0) {
+          throw new Error(`npm install 실패 (exit ${installExitCode}).`);
+        }
       }
 
       setPhase('starting');
@@ -313,9 +324,12 @@ export function useWorkspace(
 
   useEffect(() => {
     if (hasStartedRef.current) return;
-    // 과제 워크스페이스는 IndexedDB 복원(비동기)이 끝난 뒤 mount해야 저장된 편집분이
-    // 반영된다. challengeId가 없으면(PoC) 복원 대상이 없어 즉시 시작한다.
     if (challengeId && !hasHydrated) return;
+
+    // 페이지 진입마다 세션을 초기화한다 — AI 사용량·파일 편집이 모두 리셋된다.
+    // "한 번 벗어나면 시험 종료"이므로 이전 상태를 이어갈 이유가 없다.
+    if (challengeId) useWorkspaceStore.getState().resetSession(challengeId);
+
     hasStartedRef.current = true;
     queueMicrotask(() => void start());
   }, [start, challengeId, hasHydrated]);

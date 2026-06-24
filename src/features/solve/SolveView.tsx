@@ -5,7 +5,7 @@
  * 구성한다. "바이브 코딩 실력"을 시험하는 목적상 AI 채팅을 가운데 주역으로 두고,
  * AI가 작성한 코드는 우측 에디터로 흘러간다(직접 편집). 문제별 풀이 세션
  * (코드/언어/AI 사용량)은 solveSessionStore에 보관하고, 채점은
- * useGradeSubmission(/api/judge)으로 수행한다.
+ * useGradeAlgorithm(/api/grade/algorithm)으로 AI 정성 채점한다.
  *
  * 사용처: app/solve/[problemId]/page.tsx
  */
@@ -20,7 +20,7 @@ import {
   findLanguageById,
 } from '@/shared/core/constants/languages';
 import { useSolveSessionStore } from '@/shared/core/stores/solveSessionStore';
-import { useGradeSubmission } from '@/shared/core/queries/judgeQueries';
+import { useGradeAlgorithm } from '@/shared/core/queries/algorithmGradeQueries';
 import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { ProblemPanel } from '@/features/solve/components/ProblemPanel';
@@ -44,7 +44,7 @@ export function SolveView({ problem }: { problem: Problem }) {
   const recordAiTurn = useSolveSessionStore((state) => state.recordAiTurn);
 
   const [isAiOpen, setIsAiOpen] = useState(true);
-  const gradeMutation = useGradeSubmission();
+  const gradeMutation = useGradeAlgorithm();
 
   // AI 직접 편집 상태 (실시간 코드 미러링)
   const [isDirectEditEnabled, setIsDirectEditEnabled] = useState(true);
@@ -89,8 +89,6 @@ export function SolveView({ problem }: { problem: Problem }) {
   // ensureSession 효과 이전(첫 렌더)에는 세션이 없을 수 있다.
   if (!session) return null;
 
-  const currentLanguage = findLanguageById(session.languageId) ?? fallbackLanguage;
-
   const handleLanguageChange = (languageId: string) => {
     const language = findLanguageById(languageId);
     if (!language) return;
@@ -102,11 +100,10 @@ export function SolveView({ problem }: { problem: Problem }) {
     const request: GradingRequest = {
       problemId: problem.id,
       languageId: session.languageId,
-      judge0LanguageId: currentLanguage.judge0Id,
+      statement: problem.statement,
       sourceCode: session.code,
-      timeLimitSec: problem.timeLimitSec,
-      memoryLimitMb: problem.memoryLimitMb,
       testCases,
+      model: problem.aiPolicy.model,
     };
     gradeMutation.mutate(request);
   };

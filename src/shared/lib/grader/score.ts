@@ -12,8 +12,12 @@
  */
 import type {
   AutoTestResult,
+  GradingResult,
   GradingRubric,
   RubricGradingResult,
+  TestCase,
+  TestCaseResult,
+  TestCaseStatus,
 } from '@/shared/core/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -21,6 +25,17 @@ import type {
 /** LLM이 돌려주는 원시 채점 출력(정규화 전). totalScore/maxScore는 서버가 계산한다. */
 export interface RawRubricScores {
   scores: { criterionId: string; score: number; reason: string }[];
+  feedback: string;
+}
+
+/** LLM이 돌려주는 알고리즘 채점 원시 출력(정규화 전). 통과 수는 서버가 집계한다. */
+export interface RawAlgorithmScores {
+  cases: {
+    testCaseId: string;
+    status: TestCaseStatus;
+    actualOutput?: string;
+    reason?: string;
+  }[];
   feedback: string;
 }
 
@@ -56,6 +71,46 @@ export function normalizeRubricResult(
   return { scores, totalScore, maxScore, feedback: raw.feedback };
 }
 
+/**
+ * LLM 원시 알고리즘 채점을 테스트케이스 기준으로 정규화한다.
+ * - 결과 출처는 출제된 testCases(LLM이 만든 임의 케이스가 아니라).
+ * - 케이스별 status는 LLM 출력에서 찾되, 누락·미지원 값은 'error'로 보정한다.
+ * - 비공개 케이스는 input/expectedOutput을 결과에서 가린다(학생 노출 방지).
+ * - passedCount는 LLM 합산을 신뢰하지 않고 서버에서 직접 집계한다.
+ */
+export function normalizeAlgorithmResult(
+  raw: RawAlgorithmScores,
+  testCases: TestCase[],
+  meta: { problemId: string; languageId: string },
+): GradingResult {
+  const caseResults: TestCaseResult[] = testCases.map((testCase) => {
+    const found = raw.cases.find((item) => item.testCaseId === testCase.id);
+    const status = toValidStatus(found?.status);
+    return {
+      testCaseId: testCase.id,
+      isPublic: testCase.isPublic,
+      status,
+      // 비공개 케이스는 입력/기대출력·근거를 결과에 노출하지 않는다(역추론 방지).
+      input: testCase.isPublic ? testCase.input : undefined,
+      expectedOutput: testCase.isPublic ? testCase.expectedOutput : undefined,
+      actualOutput: testCase.isPublic ? found?.actualOutput : undefined,
+      reason: testCase.isPublic ? found?.reason ?? '(채점 근거 없음)' : undefined,
+    };
+  });
+
+  const passedCount = caseResults.filter((c) => c.status === 'passed').length;
+
+  return {
+    problemId: meta.problemId,
+    languageId: meta.languageId,
+    totalCount: caseResults.length,
+    passedCount,
+    caseResults,
+    feedback: raw.feedback,
+    submittedAt: Date.now(),
+  };
+}
+
 // ── 가중합 ───────────────────────────────────────────────────────────────────
 
 /**
@@ -81,4 +136,18 @@ export function computeFinalScore(
 function clamp(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) return min;
   return Math.min(Math.max(value, min), max);
+}
+
+const VALID_STATUSES: readonly TestCaseStatus[] = [
+  'passed',
+  'failed',
+  'error',
+  'timeout',
+];
+
+/** LLM이 돌려준 status가 유효 상태가 아니면(누락·오타) 'error'로 보정한다. */
+function toValidStatus(value: unknown): TestCaseStatus {
+  return VALID_STATUSES.includes(value as TestCaseStatus)
+    ? (value as TestCaseStatus)
+    : 'error';
 }

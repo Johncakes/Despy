@@ -157,6 +157,20 @@ export async function startDevServer(
   });
 }
 
+/** WebContainer가 이미 부팅된 상태인지 반환한다(재진입 감지용). */
+export function isContainerBooted(): boolean {
+  return containerInstance !== null;
+}
+
+/**
+ * 실행 중인 dev 서버 프로세스를 종료하고 참조를 비운다.
+ * 재진입 시 포트를 비워 새 dev 서버를 같은 포트에서 시작할 수 있게 한다.
+ */
+export function killDevServer(): void {
+  devProcess?.kill();
+  devProcess = null;
+}
+
 /**
  * 인스턴스를 정리하고 싱글턴 상태를 초기화한다.
  * ⚠️ WebContainer는 탭당 1회만 boot 가능하므로, teardown 후 같은 탭에서의

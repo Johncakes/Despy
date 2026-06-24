@@ -10,9 +10,12 @@
  *
  * 레이어 규칙: 외부 의존 없는 순수 로직. shared/core 타입만 참조.
  *
- * 사용처: app/api/grade/route.ts
+ * 사용처: app/api/grade/route.ts, app/api/grade/algorithm/route.ts
  */
-import type { ChallengeGradingRequest } from '@/shared/core/types';
+import type {
+  ChallengeGradingRequest,
+  GradingRequest,
+} from '@/shared/core/types';
 
 // ── 허용 오차 ─────────────────────────────────────────────────────────────
 
@@ -68,6 +71,39 @@ export function validateGradeRequest(body: unknown): string | null {
 /** 검증을 통과한 본문을 도메인 타입으로 단언한다(검증 직후에만 사용). */
 export function asGradeRequest(body: unknown): ChallengeGradingRequest {
   return body as ChallengeGradingRequest;
+}
+
+/**
+ * 알고리즘 채점 요청을 검증한다. 통과 시 null, 실패 시 첫 위반 사유 메시지를 반환한다.
+ * 테스트케이스가 비면 채점이 무의미하므로(통과율 0) 채점 전에 거부한다.
+ */
+export function validateAlgorithmRequest(body: unknown): string | null {
+  if (!isRecord(body)) return '요청 본문이 올바르지 않습니다.';
+
+  if (!isNonEmptyString(body.problemId)) return 'problemId가 필요합니다.';
+  if (!isNonEmptyString(body.languageId)) return 'languageId가 필요합니다.';
+  if (typeof body.sourceCode !== 'string') return 'sourceCode가 필요합니다.';
+
+  if (!Array.isArray(body.testCases) || body.testCases.length === 0) {
+    return 'testCases가 비어 있습니다. 최소 1개 케이스가 필요합니다.';
+  }
+  const everyCaseValid = body.testCases.every(
+    (testCase) =>
+      isRecord(testCase) &&
+      isNonEmptyString(testCase.id) &&
+      typeof testCase.input === 'string' &&
+      typeof testCase.expectedOutput === 'string',
+  );
+  if (!everyCaseValid) {
+    return 'testCases 항목에 id·input·expectedOutput이 필요합니다.';
+  }
+
+  return null;
+}
+
+/** 검증을 통과한 본문을 도메인 타입으로 단언한다(검증 직후에만 사용). */
+export function asAlgorithmRequest(body: unknown): GradingRequest {
+  return body as GradingRequest;
 }
 
 // ── 헬퍼 ─────────────────────────────────────────────────────────────────────

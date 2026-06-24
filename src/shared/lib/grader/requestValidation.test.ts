@@ -7,8 +7,14 @@
  * 사용처: `npm run test`
  */
 import { describe, it, expect } from 'vitest';
-import { validateGradeRequest } from './requestValidation';
-import type { ChallengeGradingRequest } from '@/shared/core/types';
+import {
+  validateGradeRequest,
+  validateAlgorithmRequest,
+} from './requestValidation';
+import type {
+  ChallengeGradingRequest,
+  GradingRequest,
+} from '@/shared/core/types';
 
 const validRequest: ChallengeGradingRequest = {
   problemId: 'cart-delete',
@@ -99,5 +105,55 @@ describe('validateGradeRequest', () => {
       rubric: { ...validRequest.rubric, weights: { tests: 0.7, rubric: 0.3 } },
     };
     expect(validateGradeRequest(ok)).toBeNull();
+  });
+});
+
+const validAlgorithmRequest: GradingRequest = {
+  problemId: 'two-sum',
+  languageId: 'python',
+  statement: '두 수의 합',
+  sourceCode: 'print(sum(...))',
+  testCases: [{ id: 't1', input: '1 2', expectedOutput: '3', isPublic: true }],
+};
+
+describe('validateAlgorithmRequest', () => {
+  it('정상 요청은 null(통과)', () => {
+    expect(validateAlgorithmRequest(validAlgorithmRequest)).toBeNull();
+  });
+
+  it('객체가 아닌 입력을 차단한다', () => {
+    expect(validateAlgorithmRequest(null)).not.toBeNull();
+    expect(validateAlgorithmRequest('x')).not.toBeNull();
+  });
+
+  it('problemId/languageId/sourceCode 누락을 차단한다', () => {
+    expect(
+      validateAlgorithmRequest({ ...validAlgorithmRequest, problemId: '' }),
+    ).toMatch(/problemId/);
+    expect(
+      validateAlgorithmRequest({ ...validAlgorithmRequest, languageId: '' }),
+    ).toMatch(/languageId/);
+    const { sourceCode: _omit, ...noCode } = validAlgorithmRequest;
+    expect(validateAlgorithmRequest(noCode)).toMatch(/sourceCode/);
+  });
+
+  it('빈 testCases를 차단한다(채점 무의미)', () => {
+    expect(
+      validateAlgorithmRequest({ ...validAlgorithmRequest, testCases: [] }),
+    ).toMatch(/testCases/);
+  });
+
+  it('testCase 필드 누락을 차단한다', () => {
+    const broken = {
+      ...validAlgorithmRequest,
+      testCases: [{ id: 't1', input: '1' }],
+    };
+    expect(validateAlgorithmRequest(broken)).toMatch(/testCases/);
+  });
+
+  it('빈 문자열 sourceCode는 허용한다(미작성 제출도 채점 대상)', () => {
+    expect(
+      validateAlgorithmRequest({ ...validAlgorithmRequest, sourceCode: '' }),
+    ).toBeNull();
   });
 });

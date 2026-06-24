@@ -13,14 +13,14 @@
 | **P0** | WebContainer 부팅 + 미리보기 | ✅ 완료·검증 |
 | **P1** | 편집/AI 미러링 → FS → HMR + 실제 풀이 화면 | ✅ 완료·검증 (`/playground` + `/workspace/[id]`) |
 | **P2** | WebContainer 내 `npm test` 결과 캡처 | ✅ 완료 (테스트 탭·`runTests`·vitest 템플릿) |
-| **P3** | AI 루브릭 채점 + 가중합 | 🟡 백엔드·데이터 ✅ / **제출 UI 미연결** |
-| **P4** | 출제 도구 + 제출 플로우 + 워크스페이스 persist | 🟡 출제 도구 ✅ / 워크스페이스 persist 미착수 |
+| **P3** | AI 루브릭 채점 + 가중합 | ✅ 완료 (백엔드·데이터 + 제출 UI 연결·결과 모달) |
+| **P4** | 출제 도구 + 제출 플로우 + 워크스페이스 persist | ✅ 완료 (출제 도구 ✅ / 워크스페이스 영속 `despy-workspace` IndexedDB+델타 ✅·실측) |
 | **P5** | 구 Judge0/Problem 경로 제거 | ❌ 미착수 |
 
 **핵심 방향 변경(2026-06-24)**: 백엔드 최소화 원칙 **해제**. 채점 무결성을 위해 공식 점수는
 서버(`/api/grade`)가 확정한다(§13 결정6). 채점 무결성 = (b) 서버 재실행 하이브리드 채택.
 
-**빌드 상태**: `npm run typecheck` ✅ · `npm run lint`(레이어 규칙 포함) ✅ · `npm run test` ✅ (5파일 34테스트).
+**빌드 상태**: `npm run typecheck` ✅ · `npm run lint`(레이어 규칙 포함) ✅ · `npm run test` ✅ (6파일 51테스트).
 
 ---
 
@@ -149,6 +149,33 @@ happy-dom(§3.4, Playwright 불가). 자동 테스트 결과는 **풀이 중 즉
 
 ---
 
+### P4 — 워크스페이스 영속 (완료 2026-06-24)
+
+**목표**: in-memory였던 학생 파일 버퍼·AI 사용량(질문/토큰)을 새로고침 후에도 과제별로 유지(§9.1).
+
+| 파일 | 내용 |
+|---|---|
+| `src/shared/core/stores/idbStorage.ts` | 네이티브 IndexedDB `StateStorage` 어댑터(단일 objectStore) — **새 의존성 0**. SSR/jsdom 가드 |
+| `src/shared/core/stores/workspaceStore.ts` | `despy-workspace`(v1) persist — 과제별 `{ fileDelta, activePath, questionsUsed, tokensUsed }`. `createJSONStorage(idbStorage)` + `hasHydrated` 플래그 |
+| `src/features/solve/useWorkspace.ts` | `challengeId` 인자 추가 → boot 시 델타 복원(`{...template, ...delta}` mount)·편집 debounce(400ms) 영속·`setActivePath`/`recordAiTurn` 영속·언마운트 flush. boot를 `hasHydrated` 뒤로 게이트 |
+| `src/features/solve/ChallengeSolveView.tsx` | AI 사용량을 in-memory state → `workspace.{questionsUsed,tokensUsed,recordAiTurn}`(영속)로 전환 |
+| `src/shared/core/stores/workspaceStore.test.ts` | 델타 저장·활성파일·AI 누적·격리·초기화 단위 테스트(jsdom은 IndexedDB 미구현 → in-memory degrade) |
+
+**핵심 설계 (Blocking 결정)**
+
+- **IndexedDB 접근 = 네이티브 어댑터**(idb 라이브러리 미도입) — P3의 "새 의존성 0" 기조 유지.
+- **저장 경계 = 단일 store**(`despy-workspace`, IndexedDB)에 파일 델타 + 활성파일 + AI 사용량 전부(§9.1 표 일치).
+- **델타만 저장**: 잠금 제외, 템플릿과 다른 파일만(`computeFileDelta`). 복원 시 template과 병합 → quota 절약.
+- **비동기 hydration 게이트**: IndexedDB rehydrate는 비동기 → `hasHydrated`로 boot(mount)를 복원 이후로 미뤄 저장 편집분이 미리보기에 반영. (localStorage 동기 store와의 차이 — CLAUDE.md persist 규칙에 명시)
+- **migrate 불필요**: `despy-workspace`는 신규 키(클린 슬레이트, §9.1·결정1) → v1 시작.
+- **PoC 호환**: `challengeId` 미지정(WorkspacePlaygroundView)이면 영속 건너뜀(in-memory 유지).
+
+**검증**: typecheck·lint·test(6파일 51테스트) 통과. **실측**(headless Chrome, `/workspace/sample-counter-vibe`):
+편집 → IndexedDB(`despy` > `keyval` > `despy-workspace`) `fileDelta`에 마커 저장 확인 → 새 페이지 재로드 →
+복원된 에디터에 마커 유지 확인(편집→영속, 새로고침 복원 모두 PASS).
+
+---
+
 ## 현재 타입 상태 (`shared/core/types/index.ts`)
 
 ```
@@ -203,6 +230,8 @@ src/
         ├── api/gradeApi.ts            — 채점 fetch 격리 ✅ P3
         ├── queries/gradeQueries.ts    — useGradeChallenge mutation ✅ P3
         ├── stores/challengeStore.ts   — 과제 persist(despy-challenges) ✅ P1
+        ├── stores/workspaceStore.ts   — 풀이 영속 persist(despy-workspace, IndexedDB+델타) ✅ P4
+        ├── stores/idbStorage.ts       — IndexedDB StateStorage 어댑터(네이티브) ✅ P4
         ├── types/index.ts            — 신규 도메인 타입 전체 ✅
         └── constants/
             ├── webcontainerTemplates.ts — 샘플 템플릿(+vitest) ✅ P0/P1/P2
@@ -224,7 +253,13 @@ src/
   (`upsertChallenge`/`deleteChallenge`) 사용 — persist 스키마(`despy-challenges` v1) 변경 없음.
   구성: `features/author/ChallengeAuthorView`·`useChallengeDraft`·components/`ChallengeForm`·
   `FileSetEditor`(파일 세트 편집기·잠금 토글)·`RubricEditor`(+ `AiPolicyFields` 재사용).
-- ⬜ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — 현재 in-memory 버퍼 대체 (미착수)
+- 🟡 채점 대시보드 **진입점 스캐폴드** — `GradingDashboardView` + 라우트
+  `/author/challenge/[challengeId]/submissions`(출제 편집 패널의 '채점 현황 →' 링크로 진입).
+  루브릭·AI정책 요약만 표시하고 학생 제출 목록은 빈 상태(제출 영속 모델 미도입 — 인증·다중
+  사용자와 함께 정해질 후속 단계). 현재 채점은 학생 화면 1회성이라 집계 데이터 소스가 없음.
+- ✅ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — in-memory 버퍼·AI 사용량 대체.
+  `idbStorage`(네이티브 어댑터) + `workspaceStore`(델타) + `useWorkspace`(복원/저장·hasHydrated 게이트)
+  + `ChallengeSolveView`(AI 사용량 영속화). headless Chrome로 편집→IDB 저장→새로고침 복원 실측 PASS.
 
 ### P5 — 구 경로 정리
 - `/api/judge`·`judgeApi`·`judgeQueries`·`GradingRequest`·`docker-compose.judge0.yml`·

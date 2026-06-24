@@ -74,6 +74,7 @@ src/
 │   ├── page.tsx                  홈 (역할 진입 + 과제/구 문제 목록)
 │   ├── author/page.tsx           교수 출제 화면 진입점 (구 알고리즘 — P5 정리 예정)
 │   ├── author/challenge/page.tsx 교수 과제 출제 화면 진입점 (워크스페이스 — 피벗 P4)
+│   ├── author/challenge/[challengeId]/submissions/page.tsx 교수 채점 대시보드 진입점 (스캐폴드 — 제출 영속 후속)
 │   ├── solve/[problemId]/page.tsx 학생 풀이 화면 진입점 (구 알고리즘 — P5 정리 예정)
 │   ├── workspace/[challengeId]/page.tsx 학생 과제 풀이(워크스페이스) 진입점 (피벗 P1)
 │   ├── playground/page.tsx       WebContainer PoC 진입점 (P0 — spec-webcontainer.md)
@@ -87,6 +88,7 @@ src/
 │   │                             AiPolicyFields(공용), useProblemDraft
 │   │                             + (피벗 P4) ChallengeAuthorView, useChallengeDraft, components/
 │   │                               ChallengeForm·FileSetEditor(프리셋·잠금 토글)·RubricEditor
+│   │                               + GradingDashboardView (채점 대시보드 진입점 스캐폴드 — 제출 영속 후속)
 │   └── solve/                    학생(구 알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
 │                                 GradingResultPanel
 │                                 + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
@@ -97,7 +99,7 @@ src/
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
     │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · judgeApi.ts (구 채점 fetch, P5 제거)
-    │   ├── stores/               challengeStore.ts(피벗), problemStore.ts(구), solveSessionStore.ts (Zustand persist)
+    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), problemStore.ts(구), solveSessionStore.ts (Zustand persist)
     │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), judgeQueries.ts (구, P5 제거), queryKeys.ts
     │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 구 Problem 계열)
     │   └── constants/            theme.ts, languages.ts, aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(구),
@@ -164,13 +166,13 @@ interface ListProps {
 - 서버 데이터: 채점은 **mutation**(`useGradeSubmission`, `shared/core/queries/judgeQueries.ts`).
   단일 요청 부수효과라 queryKey 불필요 → `queryKeys.ts`는 아직 비어 있음.
   AI 채팅은 `useChat`(Vercel AI SDK) transport가 `/api/agent`를 직접 호출.
-- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `problemStore`(구 알고리즘 문제, P5 제거 예정), `solveSessionStore`(문제별 코드·언어·AI 사용량).
+- 클라이언트 상태: `challengeStore`(과제/루브릭/AI정책 CRUD — 피벗), `workspaceStore`(과제별 풀이 영속 — 파일 델타+AI 사용량, IndexedDB, 피벗 P4), `problemStore`(구 알고리즘 문제, P5 제거 예정), `solveSessionStore`(문제별 코드·언어·AI 사용량).
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `problemStore → 'despy-problems'` (v1, 구), `solveSessionStore → 'despy-solve-session'` (v1)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v1, 피벗), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `problemStore → 'despy-problems'` (v1, 구), `solveSessionStore → 'despy-solve-session'` (v1)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
-- persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지)
+- persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 
 ---
 

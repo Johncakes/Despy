@@ -7,8 +7,12 @@
  * 사용처: `npm run test`
  */
 import { describe, it, expect } from 'vitest';
-import { normalizeRubricResult, computeFinalScore } from './score';
-import type { AutoTestResult, GradingRubric } from '@/shared/core/types';
+import {
+  normalizeRubricResult,
+  computeFinalScore,
+  normalizeAlgorithmResult,
+} from './score';
+import type { AutoTestResult, GradingRubric, TestCase } from '@/shared/core/types';
 
 const rubric: GradingRubric = {
   criteria: [
@@ -86,6 +90,66 @@ describe('computeFinalScore', () => {
   it('만점이면 100', () => {
     const autoTest: AutoTestResult = { passedCount: 4, totalCount: 4, cases: [] };
     expect(computeFinalScore(autoTest, fullRubric, rubric.weights)).toBe(100);
+  });
+});
+
+// AI 알고리즘 채점: status 집계·보정과 비공개 케이스 가림(역추론 방지)을 검증한다.
+describe('normalizeAlgorithmResult', () => {
+  const testCases: TestCase[] = [
+    { id: 't1', input: '1 2', expectedOutput: '3', isPublic: true },
+    { id: 't2', input: '비밀', expectedOutput: '비밀출력', isPublic: false },
+  ];
+
+  it('status를 직접 집계해 passedCount를 낸다(LLM 합산 불신)', () => {
+    const result = normalizeAlgorithmResult(
+      {
+        cases: [
+          { testCaseId: 't1', status: 'passed', actualOutput: '3', reason: 'ok' },
+          { testCaseId: 't2', status: 'failed', reason: '틀림' },
+        ],
+        feedback: '총평',
+      },
+      testCases,
+      { problemId: 'two-sum', languageId: 'python' },
+    );
+    expect(result.passedCount).toBe(1);
+    expect(result.totalCount).toBe(2);
+    expect(result.feedback).toBe('총평');
+  });
+
+  it('누락·미지원 status는 error로 보정한다', () => {
+    const result = normalizeAlgorithmResult(
+      {
+        cases: [{ testCaseId: 't1', status: 'wtf' as never, reason: '오타' }],
+        feedback: '',
+      },
+      testCases,
+      { problemId: 'p', languageId: 'python' },
+    );
+    expect(result.caseResults[0].status).toBe('error'); // 오타 → error
+    expect(result.caseResults[1].status).toBe('error'); // 누락 → error
+  });
+
+  it('비공개 케이스는 input/expected/actual/reason을 가린다', () => {
+    const result = normalizeAlgorithmResult(
+      {
+        cases: [
+          { testCaseId: 't1', status: 'passed', actualOutput: '3', reason: '공개근거' },
+          { testCaseId: 't2', status: 'passed', actualOutput: '비밀출력', reason: '비밀근거' },
+        ],
+        feedback: '',
+      },
+      testCases,
+      { problemId: 'p', languageId: 'python' },
+    );
+    const [pub, priv] = result.caseResults;
+    expect(pub.input).toBe('1 2');
+    expect(pub.reason).toBe('공개근거');
+    expect(priv.input).toBeUndefined();
+    expect(priv.expectedOutput).toBeUndefined();
+    expect(priv.actualOutput).toBeUndefined();
+    expect(priv.reason).toBeUndefined();
+    expect(priv.status).toBe('passed'); // 상태는 노출
   });
 });
 

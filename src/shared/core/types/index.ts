@@ -4,8 +4,9 @@
  * 여러 레이어에서 공유되는 도메인 타입을 이곳에 단일 출처로 정의한다.
  * despy의 핵심 도메인: 과제(ChallengeProblem) · 루브릭(GradingRubric) · 워크스페이스
  * 파일트리(ProjectFiles) · 종합 채점(ChallengeGradingResult) · AI 정책(AiPolicy) ·
- * AI 대화 사용량(AgentUsage). 구 알고리즘 모델(Problem/TestCase/GradingResult/
- * GradingRequest)은 P5 정리 단계에서 제거 예정이다(피벗 — docs/spec-webcontainer.md).
+ * AI 대화 사용량(AgentUsage) · 알고리즘 문제(Problem/TestCase/GradingResult).
+ * 알고리즘 채점은 Judge0 실행에서 AI 정성 채점으로 교체되었다(P5, 2026-06-24) —
+ * 코드를 실행하지 않고 AI가 테스트케이스 기준으로 정답성을 판정한다.
  * feature 전용 타입은 해당 feature 폴더에 두고, 공유되는 것만 여기로 승격한다.
  *
  * 사용처: features/*, shared/* 전반 (`@/shared/core/types`)
@@ -26,10 +27,10 @@ export type ProjectFiles = Record<string, string>;
 
 // ── 과제(Challenge) — WebContainer 피벗 모델 ───────────────────────────────
 //
-// 알고리즘 표준입출력(Problem/TestCase/GradingRequest)을 대체하는 실무형 웹 과제
-// 모델이다. 교수가 시작 파일트리·잠금경로·테스트·루브릭·AI정책을 출제하고, 학생은
+// 알고리즘 표준입출력(Problem/TestCase)과 나란히 존재하는 실무형 웹 과제 모델이다.
+// 교수가 시작 파일트리·잠금경로·테스트·루브릭·AI정책을 출제하고, 학생은
 // WebContainer 워크스페이스에서 풀이한 뒤 자동 테스트 + AI 루브릭으로 채점받는다.
-// (docs/spec-webcontainer.md §4) 구 Problem 계열은 P5 정리 단계에서 제거된다.
+// (docs/spec-webcontainer.md §4)
 
 /**
  * 채점 루브릭 항목. AI 정성 채점의 단위 기준이다(예: "장바구니가 비었을 때 예외 처리").
@@ -155,15 +156,13 @@ export interface ChallengeGradingRequest {
 // ── 언어 ────────────────────────────────────────────────────────────────
 
 /**
- * 지원 프로그래밍 언어. Judge0 채점과 Monaco 에디터 양쪽에 필요한 식별자를 묶는다.
+ * 지원 프로그래밍 언어. Monaco 에디터 언어 모드와 AI 채점 맥락(언어 표시명)에 쓰인다.
  */
 export interface SupportedLanguage {
   /** 내부 식별자 (예: 'python') */
   id: string;
   /** 사용자 표시명 (예: 'Python 3') */
   label: string;
-  /** Judge0 language_id (채점 API 전송용) */
-  judge0Id: number;
   /** Monaco 에디터 언어 모드 (예: 'python') */
   monacoLanguage: string;
   /** 에디터 초기 코드 스니펫 */
@@ -220,13 +219,18 @@ export interface Problem {
   updatedAt: number;
 }
 
-// ── 채점 ──────────────────────────────────────────────────────────────────
+// ── 채점 (알고리즘 — AI 정성 채점) ──────────────────────────────────────────
+//
+// 알고리즘 채점은 코드를 실행(Judge0)하는 대신 AI가 테스트케이스 기준으로 정답성을
+// 판정한다(P5, 2026-06-24). 실행이 아닌 추론이라 정답성·엣지케이스는 근사이며,
+// 시간/메모리 초과(timeSec/memoryKb)는 측정 불가다. 무결성 한계는 UI에 명시한다.
 
-/** 단일 테스트 케이스 채점 상태 */
+/** 단일 테스트 케이스 채점 상태. AI 채점은 주로 passed/failed/error를 사용한다. */
 export type TestCaseStatus = 'passed' | 'failed' | 'error' | 'timeout';
 
 /**
  * 케이스별 채점 결과. 비공개 케이스는 input/expected/actual을 생략해 표시한다.
+ * AI 채점에서는 actualOutput이 AI가 추정한 출력, reason이 통과/실패 판단 근거다.
  */
 export interface TestCaseResult {
   testCaseId: string;
@@ -234,16 +238,15 @@ export interface TestCaseResult {
   status: TestCaseStatus;
   input?: string;
   expectedOutput?: string;
+  /** AI가 추정한 실행 출력 (실제 실행 결과가 아님) */
   actualOutput?: string;
+  /** AI 채점 판단 근거 (한국어) */
+  reason?: string;
   stderr?: string;
-  /** 실행 시간(초) */
-  timeSec?: number;
-  /** 메모리 사용량(KB) */
-  memoryKb?: number;
 }
 
 /**
- * 제출 1건의 종합 채점 결과.
+ * 제출 1건의 종합 채점 결과(알고리즘).
  */
 export interface GradingResult {
   problemId: string;
@@ -252,24 +255,27 @@ export interface GradingResult {
   totalCount: number;
   passedCount: number;
   caseResults: TestCaseResult[];
-  /** 실제 Judge0가 아닌 모의(mock) 채점이면 true */
-  isMock: boolean;
+  /** 학생에게 줄 종합 피드백 (한국어) */
+  feedback: string;
   submittedAt: number;
 }
 
 /**
- * 채점 요청 페이로드 (클라이언트 → /api/judge).
- * Judge0가 요구하는 형태가 아닌, 우리 도메인 기준의 요청 형태다.
+ * 알고리즘 채점 요청 페이로드 (클라이언트 → /api/grade/algorithm).
+ * AI가 정답성을 판정하므로 실행 환경(language_id)이 아니라 채점 맥락(지문·언어·
+ * 테스트케이스)을 보낸다.
  */
 export interface GradingRequest {
   problemId: string;
   languageId: string;
-  /** Judge0 language_id */
-  judge0LanguageId: number;
+  /** 문제 지문 마크다운 (채점 맥락) */
+  statement: string;
   sourceCode: string;
-  timeLimitSec: number;
-  memoryLimitMb: number;
   testCases: TestCase[];
+  /** 채점 모델 id (미지정 시 서버 기본값) */
+  model?: string;
+  /** 채점 가드레일 시스템 프롬프트 (교수 설정) */
+  systemPrompt?: string;
 }
 
 // ── AI 사용량 ──────────────────────────────────────────────────────────────
