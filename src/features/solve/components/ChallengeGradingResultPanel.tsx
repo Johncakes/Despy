@@ -150,57 +150,97 @@ export function ChallengeGradingResultPanel({
             </BreakdownTotal>
           </Breakdown>
 
-          {/* 무결성 고지: 자동 테스트 점수 축은 학생 브라우저(WebContainer)에서 실행된
-              결과를 그대로 반영하며 서버가 재실행해 검증하지 않는다(참고 신호 — 한계 명시). */}
-          {autoTest.totalCount > 0 && (
-            <IntegrityNote>
-              ⚠ 자동 테스트 통과 수는 학생 브라우저(WebContainer)에서 실행된 결과를 그대로
-              반영합니다 — 서버가 다시 실행해 검증하지 않으므로, 이 점수 축은 무결성에 한계가
-              있습니다(참고 신호).
-            </IntegrityNote>
-          )}
-          {/* 출제 함정 고지: 테스트가 없는데 테스트 비중이 남아 있으면 그 축이 0점이 되어
-              최종 점수가 루브릭 비중만큼으로 깎인다(#4 — 학생이 사유를 알 수 있게 명시). */}
-          {autoTest.totalCount === 0 && weights.tests > 0 && (
-            <IntegrityNote>
-              ⚠ 이 과제에는 자동 테스트가 없는데 테스트 비중이 {formatPercent(weights.tests)}로
-              설정돼 있어 테스트 축이 0점으로 처리됩니다 — 최종 점수는 최대{' '}
-              {Math.round(weights.rubric * 100)}점입니다.
-            </IntegrityNote>
+          {/* ML 챌린지: 성능 점수(객관) 상세 — 지표값·합격 기준·게이지 + 무결성 한계 고지. */}
+          {ml && mlMeta && (
+            <>
+              <SectionTitle>
+                성능 점수
+                <Badge tone={ml.passed ? 'success' : 'danger'}>
+                  {ml.passed ? '합격' : '불합격'}
+                </Badge>
+              </SectionTitle>
+              <MlScoreBox>
+                <MlScoreRow>
+                  <MlScoreLabel>{mlMeta.label}</MlScoreLabel>
+                  <MlScoreValue $tone={ml.passed ? 'success' : 'danger'}>
+                    {formatMlValue(ml.metric, ml.value)}
+                  </MlScoreValue>
+                </MlScoreRow>
+                <MlGaugeTrack>
+                  <MlGaugeFill
+                    $percent={objectiveRatio * 100}
+                    $tone={ml.passed ? 'success' : 'danger'}
+                  />
+                </MlGaugeTrack>
+                <BreakdownDetail>
+                  합격 기준 {mlMeta.higherIsBetter ? '≥' : '≤'}{' '}
+                  {formatMlValue(ml.metric, ml.passThreshold)} · 숨겨진 test셋 기준
+                </BreakdownDetail>
+              </MlScoreBox>
+              <IntegrityNote>
+                ⚠ 성능 점수는 학생 브라우저(WebContainer)에서 숨겨진 test셋으로 계산되며,
+                서버가 다시 실행해 검증하지 않습니다(참고 신호 — 한계). seed 고정으로 점수
+                변동을 줄였으나 데이터 누수를 완벽히 막지는 못합니다.
+              </IntegrityNote>
+            </>
           )}
 
-          <SectionTitle>
-            자동 테스트 상세
-            <Badge
-              tone={
-                autoTest.totalCount === 0
-                  ? 'neutral'
-                  : allTestsPassed
-                    ? 'success'
-                    : 'danger'
-              }
-            >
-              {autoTest.passedCount}/{autoTest.totalCount} 통과
-            </Badge>
-          </SectionTitle>
-          {autoTest.totalCount === 0 ? (
-            <EmptyNote>이 과제에는 자동 테스트가 없습니다.</EmptyNote>
-          ) : (
-            <TestCaseList>
-              {autoTest.cases.map((testCase, index) => (
-                <TestCaseItem key={`${testCase.name}-${index}`}>
-                  <TestCaseHeader>
-                    <TestCaseStatus $passed={testCase.passed}>
-                      {testCase.passed ? '통과' : '실패'}
-                    </TestCaseStatus>
-                    <TestCaseName>{testCase.name}</TestCaseName>
-                  </TestCaseHeader>
-                  {!testCase.passed && testCase.message && (
-                    <TestCaseMessage>{testCase.message}</TestCaseMessage>
-                  )}
-                </TestCaseItem>
-              ))}
-            </TestCaseList>
+          {/* 워크스페이스 과제: 자동 테스트 상세 + 무결성 고지(ML 챌린지는 위 성능 점수로 대체). */}
+          {!isMl && (
+            <>
+              {/* 무결성 고지: 자동 테스트 점수 축은 학생 브라우저(WebContainer)에서 실행된
+                  결과를 그대로 반영하며 서버가 재실행해 검증하지 않는다(참고 신호 — 한계 명시). */}
+              {autoTest.totalCount > 0 && (
+                <IntegrityNote>
+                  ⚠ 자동 테스트 통과 수는 학생 브라우저(WebContainer)에서 실행된 결과를 그대로
+                  반영합니다 — 서버가 다시 실행해 검증하지 않으므로, 이 점수 축은 무결성에 한계가
+                  있습니다(참고 신호).
+                </IntegrityNote>
+              )}
+              {/* 출제 함정 고지: 테스트가 없는데 테스트 비중이 남아 있으면 그 축이 0점이 되어
+                  최종 점수가 루브릭 비중만큼으로 깎인다(#4 — 학생이 사유를 알 수 있게 명시). */}
+              {autoTest.totalCount === 0 && weights.tests > 0 && (
+                <IntegrityNote>
+                  ⚠ 이 과제에는 자동 테스트가 없는데 테스트 비중이 {formatPercent(weights.tests)}로
+                  설정돼 있어 테스트 축이 0점으로 처리됩니다 — 최종 점수는 최대{' '}
+                  {Math.round(weights.rubric * 100)}점입니다.
+                </IntegrityNote>
+              )}
+
+              <SectionTitle>
+                자동 테스트 상세
+                <Badge
+                  tone={
+                    autoTest.totalCount === 0
+                      ? 'neutral'
+                      : allTestsPassed
+                        ? 'success'
+                        : 'danger'
+                  }
+                >
+                  {autoTest.passedCount}/{autoTest.totalCount} 통과
+                </Badge>
+              </SectionTitle>
+              {autoTest.totalCount === 0 ? (
+                <EmptyNote>이 과제에는 자동 테스트가 없습니다.</EmptyNote>
+              ) : (
+                <TestCaseList>
+                  {autoTest.cases.map((testCase, index) => (
+                    <TestCaseItem key={`${testCase.name}-${index}`}>
+                      <TestCaseHeader>
+                        <TestCaseStatus $passed={testCase.passed}>
+                          {testCase.passed ? '통과' : '실패'}
+                        </TestCaseStatus>
+                        <TestCaseName>{testCase.name}</TestCaseName>
+                      </TestCaseHeader>
+                      {!testCase.passed && testCase.message && (
+                        <TestCaseMessage>{testCase.message}</TestCaseMessage>
+                      )}
+                    </TestCaseItem>
+                  ))}
+                </TestCaseList>
+              )}
+            </>
           )}
 
           <SectionTitle>루브릭 항목</SectionTitle>
@@ -360,6 +400,58 @@ const IntegrityNote = styled.p`
   font-size: ${({ theme }) => theme.font.sizeXs};
   color: ${({ theme }) => theme.colors.textMuted};
   line-height: 1.5;
+`;
+
+// ── ML 성능 점수 상세 ─────────────────────────────────────────────────────────
+
+const MlScoreBox = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+`;
+
+const MlScoreRow = styled.div`
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const MlScoreLabel = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+`;
+
+const MlScoreValue = styled.span<{ $tone: 'success' | 'danger' }>`
+  font-size: ${({ theme }) => theme.font.sizeLg};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  font-variant-numeric: tabular-nums;
+  color: ${({ theme, $tone }) =>
+    $tone === 'success' ? theme.colors.success : theme.colors.danger};
+`;
+
+const MlGaugeTrack = styled.div`
+  width: 100%;
+  height: 8px;
+  background: ${({ theme }) => theme.colors.surface};
+  border-radius: 4px;
+  overflow: hidden;
+`;
+
+const MlGaugeFill = styled.div<{ $percent: number; $tone: 'success' | 'danger' }>`
+  height: 100%;
+  width: ${({ $percent }) => Math.min(Math.max($percent, 0), 100)}%;
+  background: ${({ theme, $tone }) =>
+    $tone === 'success' ? theme.colors.success : theme.colors.danger};
+  border-radius: 4px;
+  transition: width 0.5s ease;
 `;
 
 // ── 자동 테스트 상세 ──────────────────────────────────────────────────────────

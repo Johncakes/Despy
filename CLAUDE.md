@@ -17,6 +17,9 @@ AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문
   - AI 답변의 코드 펜스를 에디터로 **실시간 미러링**(직접 편집 토글·작성 중 read-only·되돌리기)
 - **채점** (`app/api/grade/algorithm`): AI 정성 채점 — 코드를 실행하지 않고 테스트케이스 기준으로
   정답성을 판정한다(Judge0 실행 채점 제거 — P5, 2026-06-24). 무결성 한계(실행 아닌 추론)는 UI에 명시.
+- **ML 챌린지** (`kind: 'ml'` 워크스페이스): 브라우저 WebContainer에서 pure @tensorflow/tfjs로
+  모델을 작성(`model.mjs`)·학습하고, 제출 시 숨긴 test셋을 주입해 성능 지표(분류 정확도·회귀 RMSE)를
+  **객관 채점**(컨테이너 실행 결과) + AI 활용을 **정성 채점**(루브릭)한다. (`docs/spec-ml-challenge.md`)
 - **AI 계층** (`app/api/agent`): Gemini 프록시 — 키 은닉 + 시스템 프롬프트 주입 + 출력 토큰 한도
 - **인증/권한** (`features/auth`·`features/admin`·`app/api/auth`·`app/api/admin`): 이메일/비밀번호 +
   JWT 세션 로그인, 역할(학생/교수/관리자) 기반 접근 통제(RBAC). 사용자는 MongoDB에 영속.
@@ -100,13 +103,13 @@ src/
 │   ├── author/                   교수(알고리즘): AuthorView, ProblemForm, TestCaseEditor,
 │   │                             AiPolicyFields(공용), useProblemDraft
 │   │                             + (피벗 P4) ChallengeAuthorView, useChallengeDraft, components/
-│   │                               ChallengeForm·FileSetEditor(프리셋·잠금 토글)·RubricEditor
+│   │                               ChallengeForm(kind 선택 웹/ML · ML이면 프리셋(분류/회귀)·MlSpec(지표·임계값·seed·경로·evalCommand) 필드)·FileSetEditor(프리셋·잠금 토글)·RubricEditor
 │   │                               + GradingDashboardView (채점 대시보드 — 집계(점수분포·루브릭평균·AI사용량) + 제출 비교표 → 행 클릭 시 중앙 모달에서 탭(루브릭·대화(학생↔AI 트랜스크립트)·프롬프트-앵커 diff 타임라인·제출코드). 채점 기준도 헤더 버튼의 모달로 분리)
 │   ├── solve/                    학생(알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
 │   │                             GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
 │   │                             + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
 │   │                               AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
-│   │                               WorkspacePanel(탭: 미리보기[풀스택]·데이터[백엔드면 미리보기 대신 노출]·API 콘솔·API 로그·DB 상태·콘솔·브라우저·테스트)·WorkspaceEditorPanel·FileTree(VSC식 중첩 트리·동적 CRUD: 생성/삭제/이름변경/이동)·FileTreeIcons(인라인 SVG 아이콘)·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 콘솔 — Swagger식 엔드포인트 목록(소스에서 라우트 추론·클릭 프리필)·요청 전송·응답)·DataTablePanel(데이터 상태 테이블 뷰 — 컬렉션 조회 결과를 표로, API 콘솔의 변경 요청 시 자동 갱신·수동 새로고침·데이터 초기화(dev 서버 재시작). apiData·refreshApiData는 useWorkspace가 소유)·ApiLogList(요청/응답 실시간 로그)·DbInspector(저장소 db.json 실시간 표)
+│   │                               WorkspacePanel(탭: 미리보기[풀스택]·데이터[백엔드면 미리보기 대신 노출]·API 콘솔·API 로그·DB 상태·콘솔·브라우저·테스트 / ML 챌린지면 미리보기·테스트 대신 **성능 점수**(평가 실행→정확도/RMSE 게이지·합격 배지) 탭)·WorkspaceEditorPanel·FileTree(VSC식 중첩 트리·동적 CRUD: 생성/삭제/이름변경/이동)·FileTreeIcons(인라인 SVG 아이콘)·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 콘솔 — Swagger식 엔드포인트 목록(소스에서 라우트 추론·클릭 프리필)·요청 전송·응답)·DataTablePanel(데이터 상태 테이블 뷰 — 컬렉션 조회 결과를 표로, API 콘솔의 변경 요청 시 자동 갱신·수동 새로고침·데이터 초기화(dev 서버 재시작). apiData·refreshApiData는 useWorkspace가 소유)·ApiLogList(요청/응답 실시간 로그)·DbInspector(저장소 db.json 실시간 표)
 │   │                               + (피벗 P3) ChallengeGradingResultPanel(제출 채점 결과 모달)
 │   ├── mypage/                   마이페이지: MyPageView (알고리즘 풀이 이력 카드 그리드 + 과제 제출 테이블 — 로컬 스토어 집계)
 │   ├── auth/                     인증: LoginView, SignupView (이메일/비번 + JWT)
@@ -117,14 +120,14 @@ src/
     │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체) · authApi.ts (로그인/가입/로그아웃/me·관리자 사용자 fetch)
     │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량+이상행위 로그(integrityLog) 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (코드/언어/AI 사용량 per-problem), solveHistoryStore.ts (알고리즘 채점 결과 이력 per-problem — 마이페이지 소스)
     │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), authQueries.ts (useCurrentUser·login/signup/logout·관리자 사용자/역할), queryKeys.ts (auth·admin)
-    │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열 / 인증 UserRole·AuthUser)
+    │   ├── types/                index.ts (ChallengeProblem(+kind·ml)·ChallengeKind·MlSpec·MlMetric·MlEvalResult·MlGradingResult·GradingRubric·ChallengeGradingRequest(+mlScore)·ChallengeGradingResult(+ml)·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열 / 인증 UserRole·AuthUser)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
-    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT). 백엔드 템플릿은 db 모듈(파일 백업 db.json+인메모리, createApp(db) DI)·요청 로깅 미들웨어(stdout 센티넬→API 로그)·node --watch 자동 재시작 포함)
+    │                             webcontainerTemplates.ts (샘플 트리 — Vite+React 프론트 / Express 백엔드 / 풀스택(Vite+Express 단일 컨테이너, FULLSTACK_PREVIEW_PORT). 백엔드 템플릿은 db 모듈(파일 백업 db.json+인메모리, createApp(db) DI)·요청 로깅 미들웨어(stdout 센티넬→API 로그)·node --watch 자동 재시작 포함. **ML 챌린지 템플릿**(ML_CLASSIFICATION_TEMPLATE·ML_REGRESSION_TEMPLATE + ML_*_TEST_FILES 숨긴 test셋 + ML_*_LOCKED_PATHS): pure @tensorflow/tfjs(tfjs-node 불가)로 dev 서버 없이 학습·평가, 잠긴 eval.mjs가 고정 seed로 새로 학습 후 __DESPY_SCORE__ 센티넬로 점수 출력. 학생은 model.mjs·train.mjs만 편집)
     ├── lib/                      재사용 로직
     │   ├── auth/                 password.ts(bcryptjs 해시) · jwt.ts(jose 서명·검증 + SESSION_COOKIE) · session.ts(쿠키 발급/해제 · getCurrentUser·requireUser·requireRole 가드)
     │   ├── db/                   mongodb.ts (연결 싱글턴 — lazy, getClient/getDb) · users.ts (users 컬렉션 리포지토리 — passwordHash 제외 매핑)
-    │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
-    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피 · readContainerFile/watchContainerFile은 db.json을 fs.watch→DB 상태 라이브 뷰) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
+    │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합(ML은 objectiveRatioOverride로 성능 비율 대체)·알고리즘 정규화) · mlScore.ts(ML 지표 방향·합격 판정(accuracy≥/rmse≤)·표시·[0,1] 환산 — UI·채점 공용) · requestValidation.ts(요청 검증·mlScore) · index.ts(교체점)
+    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피 · readContainerFile/watchContainerFile은 db.json을 fs.watch→DB 상태 라이브 뷰 · runScoreEval은 ML eval(evalCommand)을 일회 실행해 __DESPY_SCORE__ 센티넬 파싱→성능 점수, 타임아웃·seed env(DESPY_SEED) 주입) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출), lineDiff.ts (라인/파일트리 diff — 대시보드 코드 변경점)
     │   └── hooks/                useHasMounted.ts (hydration 가드), useProctoringMonitor.ts (시험 감독 — 탭이탈·붙여넣기·전체화면이탈 감지·IntegrityLog 제공 · docs/spec-anti-cheating.md)
     ├── components/               모든 UI 컴포넌트
@@ -190,7 +193,7 @@ interface ListProps {
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v3, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3)), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v2, 피벗 — localStorage · v2에서 integrityLog(시험 감독 로그) 필드 추가 — optional·무변환 migrate), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1), `solveHistoryStore → 'despy-solve-history'` (v1 — 알고리즘 채점 결과 이력)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v4, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3) + ML 챌린지 kind 필수화 backfill(v4: 기존 과제 kind:'workspace')), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v2, 피벗 — localStorage · v2에서 integrityLog(시험 감독 로그) 필드 추가 — optional·무변환 migrate), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1), `solveHistoryStore → 'despy-solve-history'` (v1 — 알고리즘 채점 결과 이력)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 

@@ -150,10 +150,17 @@ describe('App', () => {
 
   it('버튼을 누르면 카운트가 1 증가한다', () => {
     render(<App />);
-    const button = screen.getByRole('button');
+    const button = screen.getByRole('button', { name: /count is/i });
     expect(button).toHaveTextContent('count is 0');
     fireEvent.click(button);
     expect(button).toHaveTextContent('count is 1');
+  });
+
+  it('감소 버튼을 누르면 카운트가 1 줄어든다', () => {
+    render(<App />);
+    const decreaseBtn = screen.getByRole('button', { name: '감소' });
+    fireEvent.click(decreaseBtn);
+    expect(screen.getByRole('button', { name: /count is/i })).toHaveTextContent('count is -1');
   });
 });
 `,

@@ -490,9 +490,14 @@ export async function runScoreEval(
   const start = buffer.indexOf(SCORE_PREFIX);
   const end = buffer.indexOf(SCORE_SUFFIX);
   if (start === -1 || end === -1 || end < start) {
+    // 센티넬이 없으면 eval이 점수 출력 전에 실패한 것이다. 실제 원인(모듈 부재·런타임
+    // 오류 등)을 알 수 있게 출력 꼬리를 잘라 에러 메시지에 함께 싣는다(콘솔 탭과 별개로
+    // 성능 점수 탭에서 바로 보이도록).
+    const tail = buffer.trim().slice(-600);
+    const detail = tail ? `\n--- eval 출력 ---\n${tail}` : ' (출력 없음 — eval 실행 자체가 실패했을 수 있습니다.)';
     return {
       ok: false,
-      error: `점수 출력을 찾지 못했습니다 (exit ${exitCode}). eval 스크립트가 ${SCORE_PREFIX} 센티넬을 출력하는지 확인하세요.`,
+      error: `점수 출력을 찾지 못했습니다 (exit ${exitCode}). eval이 ${SCORE_PREFIX} 센티넬을 출력하기 전에 실패했습니다.${detail}`,
       rawOutput: buffer,
       timedOut,
       exitCode,
