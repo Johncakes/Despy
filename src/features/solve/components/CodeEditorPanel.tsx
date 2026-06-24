@@ -95,7 +95,7 @@ export function CodeEditorPanel({
       <EditorHost>
         <MonacoEditor
           height="100%"
-          theme="vs-dark"
+          theme="vs"
           language={monacoLanguage}
           value={code}
           onChange={(value) => onCodeChange(value ?? '')}

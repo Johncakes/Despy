@@ -9,19 +9,19 @@
 
 export const theme = {
   colors: {
-    background: '#0f1117',
-    surface: '#1a1d27',
-    surfaceAlt: '#222634', // surface 위에 한 단계 더 떠 보이는 패널/입력 배경
-    codeBg: '#0b0d13', // 코드 에디터/코드블록 배경 (가장 어두운 톤)
-    border: '#2a2e3a',
-    text: '#e6e8ee',
-    textMuted: '#9aa0ac',
-    primary: '#5b8cff',
-    primaryHover: '#7aa1ff',
-    info: '#5bc0ff', // 보조 정보 강조(토큰/메타)
-    success: '#3ecf8e',
-    danger: '#ff5b6e',
-    warning: '#ffcf5b',
+    background: '#f3f4f6', // Soft light gray background like LeetCode layout background
+    surface: '#ffffff', // Clean white panels/cards
+    surfaceAlt: '#f9fafb', // Light gray for panel headers, lists, tabs, and console panels
+    codeBg: '#f7f9fa', // Background color for code blocks and read-only editors
+    border: '#e5e7eb', // Crisp light border color
+    text: '#1f2937', // Dark gray for body text, providing high contrast
+    textMuted: '#6b7280', // Soft gray for meta/muted text
+    primary: '#1d4ed8', // Premium desktop UI blue for primary highlights
+    primaryHover: '#3b82f6', // Brighter blue hover state
+    info: '#0284c7', // Desktop UI blue accent for logs and stats
+    success: '#2cbb5d', // Signature LeetCode green for successful testcases
+    danger: '#ef4743', // Signature LeetCode red for failures
+    warning: '#f59e0b', // Amber for warnings/locks
   },
   spacing: {
     xs: '4px',

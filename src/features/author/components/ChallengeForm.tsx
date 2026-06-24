@@ -67,7 +67,9 @@ export function ChallengeForm({
   return (
     <Form onSubmit={handleSubmit}>
       <Section>
-        <SectionTitle>기본 정보</SectionTitle>
+        <SectionHeader>
+          <SectionTitle>기본 정보</SectionTitle>
+        </SectionHeader>
         <Field label="제목">
           <TextInput
             value={draft.title}
@@ -111,7 +113,9 @@ export function ChallengeForm({
       </Section>
 
       <Section>
-        <SectionTitle>실행 명령</SectionTitle>
+        <SectionHeader>
+          <SectionTitle>실행 명령</SectionTitle>
+        </SectionHeader>
         <Field label="설치(setup) 명령" hint="한 줄에 하나씩 (예: npm install)">
           <TextArea
             value={draft.setupCommands.join('\n')}
@@ -140,7 +144,9 @@ export function ChallengeForm({
       </Section>
 
       <Section>
-        <SectionTitle>채점 테스트 파일</SectionTitle>
+        <SectionHeader>
+          <SectionTitle>채점 테스트 파일</SectionTitle>
+        </SectionHeader>
         <SectionHint>
           제출 시점에만 FS에 주입되는 자동 채점 테스트입니다(학생 비노출). 내부 구현이 아닌
           사용자에게 보이는 동작을 검증하세요(§3.4 — 행동 기준 테스트).
@@ -153,7 +159,9 @@ export function ChallengeForm({
       </Section>
 
       <Section>
-        <SectionTitle>채점 루브릭</SectionTitle>
+        <SectionHeader>
+          <SectionTitle>채점 루브릭</SectionTitle>
+        </SectionHeader>
         <RubricEditor
           rubric={draft.rubric}
           onChange={(next) => updateField('rubric', next)}
@@ -161,7 +169,9 @@ export function ChallengeForm({
       </Section>
 
       <Section>
-        <SectionTitle>AI 에이전트 정책</SectionTitle>
+        <SectionHeader>
+          <SectionTitle>AI 에이전트 정책</SectionTitle>
+        </SectionHeader>
         <AiPolicyFields
           policy={draft.aiPolicy}
           onChange={(next) => updateField('aiPolicy', next)}
@@ -187,13 +197,17 @@ export function ChallengeForm({
 const Form = styled.form`
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.lg};
+  gap: ${({ theme }) => theme.spacing.md};
 `;
 
 const Section = styled.section`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
 `;
 
 const SectionHeader = styled.div`
@@ -201,13 +215,19 @@ const SectionHeader = styled.div`
   align-items: center;
   justify-content: space-between;
   gap: ${({ theme }) => theme.spacing.sm};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  padding-bottom: ${({ theme }) => theme.spacing.sm};
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
 `;
 
 const SectionTitle = styled.h2`
   margin: 0;
   font-size: ${({ theme }) => theme.font.sizeMd};
   font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.primary};
+  color: ${({ theme }) => theme.colors.text};
+  border-left: 3px solid ${({ theme }) => theme.colors.primary};
+  padding-left: ${({ theme }) => theme.spacing.sm};
+  line-height: 1.2;
 `;
 
 const SectionHint = styled.p`

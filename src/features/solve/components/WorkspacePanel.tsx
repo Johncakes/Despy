@@ -672,7 +672,7 @@ const StepIndicator = styled.div<{ $state: StepState }>`
   font-weight: bold;
   flex-shrink: 0;
   color: ${({ theme, $state }) =>
-    $state === 'done' ? theme.colors.background : theme.colors.textMuted};
+    $state === 'done' ? '#ffffff' : theme.colors.textMuted};
   background: ${({ theme, $state }) =>
     $state === 'done'
       ? theme.colors.success
