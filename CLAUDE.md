@@ -115,7 +115,7 @@ src/
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
     │   ├── api/                  gradeApi.ts (과제 채점 fetch, 피벗 P3) · algorithmGradeApi.ts (알고리즘 AI 채점 fetch, P5 — judgeApi 대체) · authApi.ts (로그인/가입/로그아웃/me·관리자 사용자 fetch)
-    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (코드/언어/AI 사용량 per-problem), solveHistoryStore.ts (알고리즘 채점 결과 이력 per-problem — 마이페이지 소스)
+    │   ├── stores/               challengeStore.ts(피벗), workspaceStore.ts(피벗 P4 — 풀이 영속, IndexedDB), idbStorage.ts(IndexedDB StateStorage 어댑터), submissionStore.ts(피벗 — 제출 채점결과+제출코드+프롬프트(시점별 코드 스냅샷)+AI사용량+이상행위 로그(integrityLog) 보관, 대시보드 소스), problemStore.ts(알고리즘), solveSessionStore.ts (코드/언어/AI 사용량 per-problem), solveHistoryStore.ts (알고리즘 채점 결과 이력 per-problem — 마이페이지 소스)
     │   ├── queries/              gradeQueries.ts (과제 채점 mutation, 피벗 P3), algorithmGradeQueries.ts (알고리즘 AI 채점 mutation, P5 — judgeQueries 대체), authQueries.ts (useCurrentUser·login/signup/logout·관리자 사용자/역할), queryKeys.ts (auth·admin)
     │   ├── types/                index.ts (ChallengeProblem·GradingRubric·ChallengeGradingRequest·ChallengeGradingResult·ProjectFiles·AiPolicy / 알고리즘 Problem·TestCase·GradingRequest·GradingResult 계열 / 인증 UserRole·AuthUser)
     │   └── constants/            theme.ts, languages.ts(judge0Id 제거됨), aiPolicy.ts, sampleChallenges.ts(피벗), sampleProblems.ts(알고리즘),
@@ -126,7 +126,7 @@ src/
     │   ├── grader/               grader.ts(인터페이스 — gradeRubric+gradeAlgorithm) · geminiGrader.ts(구현) · score.ts(정규화·가중합·알고리즘 정규화) · requestValidation.ts(요청 검증) · index.ts(교체점)
     │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn·타임아웃 가드 · startDevServer는 previewPort로 풀스택 멀티포트 중 프론트 포트만 미리보기 확정 · sendHttpRequest는 컨테이너 안에서 백엔드로 요청 실행→API 콘솔용, 호스트 직접 fetch의 CORS/COEP 회피 · readContainerFile/watchContainerFile은 db.json을 fs.watch→DB 상태 라이브 뷰) · fileSync.ts (편집→FS debounce 동기화) · testRunner.ts (npm test 실행·JSON 리포터 파싱→AutoTestResult)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출), lineDiff.ts (라인/파일트리 diff — 대시보드 코드 변경점)
-    │   └── hooks/                useHasMounted.ts (hydration 가드)
+    │   └── hooks/                useHasMounted.ts (hydration 가드), useProctoringMonitor.ts (시험 감독 — 탭이탈·붙여넣기·전체화면이탈 감지·IntegrityLog 제공 · docs/spec-anti-cheating.md)
     ├── components/               모든 UI 컴포넌트
     │   ├── ui/                   Button, Panel, Modal(중앙 오버레이 — ESC·배경클릭 닫기·스크롤락), Badge, Markdown, QuotaMeter, Field, PageShell
     │   └── providers/            AppProviders, ThemeProvider, QueryProvider, styled 레지스트리
@@ -190,7 +190,7 @@ interface ListProps {
 
 ### Zustand persist 규칙
 - store별 **고유 persist key** (`'despy-{domain}'`)
-- 현재 persist key: `challengeStore → 'despy-challenges'` (v3, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3)), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v1, 피벗 — localStorage), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1), `solveHistoryStore → 'despy-solve-history'` (v1 — 알고리즘 채점 결과 이력)
+- 현재 persist key: `challengeStore → 'despy-challenges'` (v3, 피벗 — 루브릭 레벨 anchor(v2) + 풀스택 샘플 시드 보강 additive migrate(v3)), `workspaceStore → 'despy-workspace'` (v1, 피벗 P4 — **IndexedDB** 백엔드, `idbStorage` 어댑터), `submissionStore → 'despy-submissions'` (v2, 피벗 — localStorage · v2에서 integrityLog(시험 감독 로그) 필드 추가 — optional·무변환 migrate), `problemStore → 'despy-problems'` (v1, 알고리즘), `solveSessionStore → 'despy-solve-session'` (v1), `solveHistoryStore → 'despy-solve-history'` (v1 — 알고리즘 채점 결과 이력)
 - persist 스키마 변경 시 `version` 번호 올리고 `migrate()` 작성 **필수** (안 하면 기존 사용자 앱 깨짐)
 - persist 스토어를 읽는 화면은 `useHasMounted`로 마운트 이후 렌더(hydration mismatch 방지). **비동기 storage(IndexedDB)** 는 추가로 store의 `hasHydrated` 플래그로 rehydrate 완료를 게이트한다(`workspaceStore` → `useWorkspace` boot 시퀀스).
 

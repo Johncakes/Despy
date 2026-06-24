@@ -30,6 +30,11 @@ import { ProblemPanel } from '@/features/solve/components/ProblemPanel';
 import { CodeEditorPanel } from '@/features/solve/components/CodeEditorPanel';
 import { GradingResultPanel } from '@/features/solve/components/GradingResultPanel';
 import {
+  FullscreenPrompt,
+  ProctoringNotice,
+  AnomalyBadge,
+} from '@/features/solve/components/ProctoringControls';
+import {
   AiChatPanel,
   type EditApplyReport,
 } from '@/features/solve/components/AiChatPanel';
@@ -44,8 +49,6 @@ export function SolveView({ problem }: { problem: Problem }) {
   const fallbackLanguage = languages[0];
 
   const { log: integrityLog, isFullscreen, requestFullscreen } = useProctoringMonitor();
-  const totalAnomalies =
-    integrityLog.tabSwitchCount + integrityLog.externalPasteCount + integrityLog.fullscreenExitCount;
 
   const session = useSolveSessionStore((state) => state.sessions[problem.id]);
   const ensureSession = useSolveSessionStore((state) => state.ensureSession);
@@ -140,8 +143,10 @@ export function SolveView({ problem }: { problem: Problem }) {
       statement: problem.statement,
       sourceCode: session.code,
       testCases,
+      // 모델은 문제 AI 정책을 따르되, aiPolicy.systemPrompt(채팅 답변 가드레일)는 채점
+      // 가드레일이 아니므로 보내지 않는다 — grader의 기본 채점 프롬프트를 쓴다.
+      // (ChallengeSolveView 제출 흐름과 동일한 결정.)
       model: problem.aiPolicy.model,
-      systemPrompt: problem.aiPolicy.systemPrompt,
     };
     gradeMutation.mutate(
       request,
@@ -153,24 +158,12 @@ export function SolveView({ problem }: { problem: Problem }) {
 
   return (
     <Wrapper>
-      {!isFullscreen && (
-        <FullscreenBanner>
-          시험 모드를 위해 전체화면을 권장합니다.
-          <FullscreenButton type="button" onClick={requestFullscreen}>
-            전체화면 시작
-          </FullscreenButton>
-        </FullscreenBanner>
-      )}
+      <FullscreenPrompt isFullscreen={isFullscreen} onRequestFullscreen={requestFullscreen} />
+      <ProctoringNotice reportedToInstructor={false} />
       <TopBar>
         <BackLink href="/">← 목록</BackLink>
         <Title>{problem.title}</Title>
-        {totalAnomalies > 0 && (
-          <AnomalyBadge
-            title={`탭 이탈 ${integrityLog.tabSwitchCount}회 · 외부 붙여넣기 ${integrityLog.externalPasteCount}회 · 전체화면 이탈 ${integrityLog.fullscreenExitCount}회`}
-          >
-            ⚠ {totalAnomalies}
-          </AnomalyBadge>
-        )}
+        <AnomalyBadge log={integrityLog} />
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
             AI 도우미 열기
@@ -313,40 +306,4 @@ const EditorArea = styled.div`
 const ResultArea = styled.div`
   flex: 1;
   min-height: 0;
-`;
-
-const FullscreenBanner = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: ${({ theme }) => theme.spacing.sm};
-  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.md}`};
-  background: ${({ theme }) => theme.colors.surfaceAlt};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-const FullscreenButton = styled.button`
-  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  font-family: inherit;
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.primary};
-  background: transparent;
-  border: 1px solid ${({ theme }) => theme.colors.primary};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  cursor: pointer;
-`;
-
-const AnomalyBadge = styled.span`
-  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.warning};
-  border: 1px solid ${({ theme }) => theme.colors.warning};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  cursor: default;
-  white-space: nowrap;
 `;

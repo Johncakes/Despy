@@ -524,11 +524,11 @@ export interface AgentUsageMetadata {
  *    확실한 차단은 Electron 앱이 필요하다(docs/spec-anti-cheating.md 참조).
  */
 export interface IntegrityLog {
-  /** visibilitychange(hidden) + window blur 감지 횟수 */
+  /** visibilitychange(hidden) 감지 횟수 */
   tabSwitchCount: number;
   /** 탭이 숨겨진 누적 시간(ms) */
   tabSwitchTotalMs: number;
-  /** 30자 초과 붙여넣기 횟수 */
+  /** 30자 초과 붙여넣기 횟수 — 앱 내부 자기복사/외부 유입을 구분하지 못하는 약신호 */
   externalPasteCount: number;
   /** 전체화면 이탈 횟수(전체화면 진입 후 나간 경우만 카운트) */
   fullscreenExitCount: number;

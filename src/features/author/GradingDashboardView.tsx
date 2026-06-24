@@ -358,7 +358,7 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                 <HeadCell $col="test">테스트</HeadCell>
                 <HeadCell $col="questions">질문</HeadCell>
                 <HeadCell $col="tokens">토큰</HeadCell>
-                <HeadCell $col="integrity" title="이상행위 감지(탭이탈+붙여넣기+전체화면이탈)">⚠</HeadCell>
+                <HeadCell $col="integrity" title="이상행위(탭이탈+붙여넣기 합계) — 클라이언트 자기보고값이라 위조 가능, 전체화면 이탈은 참고용. 대화·diff 타임라인과 교차검증 필요">⚠</HeadCell>
                 <HeadCell $col="score">점수</HeadCell>
                 <HeadCell $col="chevron" aria-hidden />
               </TableHeadRow>
@@ -395,19 +395,19 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                     <BodyCell $col="integrity">
                       {submission.integrityLog ? (
                         (() => {
-                          const total =
-                            submission.integrityLog.tabSwitchCount +
-                            submission.integrityLog.externalPasteCount +
-                            submission.integrityLog.fullscreenExitCount;
-                          return total > 0 ? (
+                          const { tabSwitchCount, externalPasteCount, fullscreenExitCount } =
+                            submission.integrityLog;
+                          // 전체화면 이탈은 정상 Esc·F11로도 발생(오탐)해 경고 합계에서 제외하고
+                          // 툴팁에 참고로만 노출한다. 이 카운트는 위조 가능한 자기보고값이다.
+                          const flagged = tabSwitchCount + externalPasteCount;
+                          return flagged > 0 ? (
                             <IntegrityFlag
-                              $level={total >= 5 ? 'high' : total >= 2 ? 'mid' : 'low'}
-                              title={`탭이탈 ${submission.integrityLog.tabSwitchCount}회 · 붙여넣기 ${submission.integrityLog.externalPasteCount}회 · 전체화면이탈 ${submission.integrityLog.fullscreenExitCount}회`}
+                              title={`탭이탈 ${tabSwitchCount}회 · 붙여넣기 ${externalPasteCount}회 · 전체화면이탈 ${fullscreenExitCount}회(참고) — 클라이언트 자기보고값(위조 가능)`}
                             >
-                              {total}
+                              {flagged}
                             </IntegrityFlag>
                           ) : (
-                            <span style={{ color: 'inherit' }}>—</span>
+                            '—'
                           );
                         })()
                       ) : (
@@ -512,10 +512,12 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
               {selectedSubmission.integrityLog && (() => {
                 const { tabSwitchCount, externalPasteCount, fullscreenExitCount, tabSwitchTotalMs } =
                   selectedSubmission.integrityLog;
-                const total = tabSwitchCount + externalPasteCount + fullscreenExitCount;
-                return total > 0 ? (
-                  <HeaderMetaItem title={`탭이탈 ${tabSwitchCount}회(${Math.round(tabSwitchTotalMs / 1000)}초) · 붙여넣기 ${externalPasteCount}회 · 전체화면이탈 ${fullscreenExitCount}회`}>
-                    ⚠ 이상행위 {total}건
+                // 전체화면 이탈은 오탐이 많아 경고 합계에서 제외(참고용). 자기보고값이라 위조 가능 —
+                // 단정적 증거가 아니라 대화·diff 타임라인과 교차검증할 보조 신호로 본다.
+                const flagged = tabSwitchCount + externalPasteCount;
+                return flagged > 0 ? (
+                  <HeaderMetaItem title={`탭이탈 ${tabSwitchCount}회(${Math.round(tabSwitchTotalMs / 1000)}초) · 붙여넣기 ${externalPasteCount}회 · 전체화면이탈 ${fullscreenExitCount}회(참고) — 자기보고·위조 가능`}>
+                    ⚠ 이상행위 {flagged}건(참고)
                   </HeaderMetaItem>
                 ) : null;
               })()}
@@ -1510,15 +1512,12 @@ const Empty = styled.p`
   color: ${({ theme }) => theme.colors.textMuted};
 `;
 
-// 이상행위 횟수 배지 — 횟수에 따라 색상 구분(low/mid/high).
-const IntegrityFlag = styled.span<{ $level: 'low' | 'mid' | 'high' }>`
+// 이상행위 횟수 배지 — 위조 가능한 클라이언트 자기보고 신호라 색상 등급(위험/경고) 없이
+// 중립(textMuted) 카운트로만 표시한다. 색상 등급화는 교수가 검증된 증거로 오인할 위험이 커
+// 의도적으로 제거했다(docs/spec-anti-cheating.md §1 — detection+audit, 단정 금지).
+const IntegrityFlag = styled.span`
   font-size: ${({ theme }) => theme.font.sizeXs};
   font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme, $level }) =>
-    $level === 'high'
-      ? theme.colors.danger
-      : $level === 'mid'
-        ? theme.colors.warning
-        : theme.colors.textMuted};
+  color: ${({ theme }) => theme.colors.textMuted};
   cursor: default;
 `;

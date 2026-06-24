@@ -59,6 +59,29 @@ describe('validateGradeRequest', () => {
     expect(validateGradeRequest(rest)).toMatch(/autoTest/);
   });
 
+  it('passedCount > totalCount(내부 일관성 위반)를 차단한다', () => {
+    const broken = {
+      ...validRequest,
+      autoTest: { passedCount: 999, totalCount: 1, cases: [] },
+    };
+    expect(validateGradeRequest(broken)).toMatch(/일관되지 않습니다/);
+  });
+
+  it('음수·NaN passedCount를 차단한다 (점수 오염 방지)', () => {
+    expect(
+      validateGradeRequest({
+        ...validRequest,
+        autoTest: { passedCount: -1, totalCount: 2, cases: [] },
+      }),
+    ).toMatch(/일관되지 않습니다/);
+    expect(
+      validateGradeRequest({
+        ...validRequest,
+        autoTest: { passedCount: NaN, totalCount: 2, cases: [] },
+      }),
+    ).toMatch(/일관되지 않습니다/);
+  });
+
   it('weights 누락을 차단한다', () => {
     const broken = {
       ...validRequest,

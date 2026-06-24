@@ -13,13 +13,17 @@
  */
 import { grader } from '@/shared/lib/grader';
 import { computeFinalScore } from '@/shared/lib/grader/score';
+import { isMlPassing, mlScoreRatio } from '@/shared/lib/grader/mlScore';
 import {
   validateGradeRequest,
   asGradeRequest,
 } from '@/shared/lib/grader/requestValidation';
 import { requireUser, authErrorToResponse } from '@/shared/lib/auth/session';
 import { logger } from '@/shared/lib/utils/logger';
-import type { ChallengeGradingResult } from '@/shared/core/types';
+import type {
+  ChallengeGradingResult,
+  MlGradingResult,
+} from '@/shared/core/types';
 
 export const runtime = 'nodejs';
 
@@ -71,16 +75,34 @@ export async function POST(req: Request): Promise<Response> {
       systemPrompt: body.systemPrompt,
     });
 
+    // ML 챌린지면 성능 점수(객관)를 최종 점수의 객관 축으로 환산해 가중합에 넣고,
+    // 합격 여부(metric 방향에 따른 임계값 비교)와 함께 결과에 담는다. 워크스페이스
+    // 과제면 mlScore가 없어 기존대로 자동 테스트 통과율이 객관 축이 된다.
+    let ml: MlGradingResult | undefined;
+    let objectiveRatioOverride: number | undefined;
+    if (body.mlScore) {
+      const { metric, value, passThreshold } = body.mlScore;
+      ml = {
+        metric,
+        value,
+        passThreshold,
+        passed: isMlPassing(metric, value, passThreshold),
+      };
+      objectiveRatioOverride = mlScoreRatio(metric, value, passThreshold);
+    }
+
     const finalScore = computeFinalScore(
       body.autoTest,
       rubricResult,
       body.rubric.weights,
+      objectiveRatioOverride,
     );
 
     const result: ChallengeGradingResult = {
       problemId: body.problemId,
       autoTest: body.autoTest,
       rubric: rubricResult,
+      ml,
       finalScore,
       submittedAt: Date.now(),
     };

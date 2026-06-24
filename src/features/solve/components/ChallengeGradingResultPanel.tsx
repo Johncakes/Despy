@@ -14,6 +14,10 @@
  * 가중합(computeFinalScore와 동일 식)임을 산출표로 보여주고, 자동 테스트는 케이스별
  * 통과/실패·실패 메시지까지 펼쳐 학생이 점수 근거를 검증할 수 있게 한다.
  *
+ * 무결성 고지: 자동 테스트 점수 축은 학생 브라우저(WebContainer) 실행 결과를 그대로
+ * 반영하며 서버가 재실행해 검증하지 않는다(참고 신호 — 한계 명시). 테스트가 없는데
+ * 테스트 비중이 남아 있으면 그 축이 0점이 되어 최종 점수가 깎임도 함께 고지한다.
+ *
  * 사용처: features/solve/ChallengeSolveView (제출 후 결과 표시)
  */
 'use client';
@@ -24,6 +28,11 @@ import type {
   GradingRubric,
   RubricCriterion,
 } from '@/shared/core/types';
+import {
+  formatMlValue,
+  mlMetricMeta,
+  mlScoreRatio,
+} from '@/shared/lib/grader/mlScore';
 import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -64,17 +73,23 @@ export function ChallengeGradingResultPanel({
   weights,
   onClose,
 }: ChallengeGradingResultPanelProps) {
-  const { autoTest, rubric, finalScore } = result;
+  const { autoTest, rubric, finalScore, ml } = result;
+  const isMl = ml != null;
   const allTestsPassed =
     autoTest.totalCount > 0 && autoTest.passedCount === autoTest.totalCount;
 
   // 최종 점수 산출(서버 computeFinalScore와 동일 식)을 그대로 풀어 보여준다.
-  // 분모 0(테스트/항목 없음)은 0%로 처리한다.
+  // 분모 0(테스트/항목 없음)은 0%로 처리한다. ML 챌린지는 객관 축이 자동 테스트가
+  // 아니라 성능 지표라, objectiveRatio를 mlScoreRatio로 환산한다(metric 방향 반영).
   const testsRatio =
     autoTest.totalCount > 0 ? autoTest.passedCount / autoTest.totalCount : 0;
+  const objectiveRatio = ml
+    ? mlScoreRatio(ml.metric, ml.value, ml.passThreshold)
+    : testsRatio;
   const rubricRatio = rubric.maxScore > 0 ? rubric.totalScore / rubric.maxScore : 0;
-  const testsContribution = testsRatio * weights.tests * 100;
+  const objectiveContribution = objectiveRatio * weights.tests * 100;
   const rubricContribution = rubricRatio * weights.rubric * 100;
+  const mlMeta = ml ? mlMetricMeta(ml.metric) : null;
 
   return (
     <Overlay onClick={onClose}>
@@ -97,14 +112,24 @@ export function ChallengeGradingResultPanel({
           <Breakdown>
             <BreakdownRow>
               <BreakdownMain>
-                <BreakdownLabel>자동 테스트</BreakdownLabel>
+                <BreakdownLabel>{isMl ? '성능 점수' : '자동 테스트'}</BreakdownLabel>
                 <BreakdownContribution>
-                  +{testsContribution.toFixed(1)}점
+                  +{objectiveContribution.toFixed(1)}점
                 </BreakdownContribution>
               </BreakdownMain>
               <BreakdownDetail>
-                {autoTest.passedCount}/{autoTest.totalCount} 통과 · 통과율{' '}
-                {formatPercent(testsRatio)} × 비중 {formatPercent(weights.tests)}
+                {ml ? (
+                  <>
+                    {mlMeta?.label} {formatMlValue(ml.metric, ml.value)} ·{' '}
+                    {ml.passed ? '합격' : '불합격'} · 환산 {formatPercent(objectiveRatio)}{' '}
+                    × 비중 {formatPercent(weights.tests)}
+                  </>
+                ) : (
+                  <>
+                    {autoTest.passedCount}/{autoTest.totalCount} 통과 · 통과율{' '}
+                    {formatPercent(testsRatio)} × 비중 {formatPercent(weights.tests)}
+                  </>
+                )}
               </BreakdownDetail>
             </BreakdownRow>
             <BreakdownRow>
@@ -124,6 +149,25 @@ export function ChallengeGradingResultPanel({
               <strong>{finalScore} / 100</strong>
             </BreakdownTotal>
           </Breakdown>
+
+          {/* 무결성 고지: 자동 테스트 점수 축은 학생 브라우저(WebContainer)에서 실행된
+              결과를 그대로 반영하며 서버가 재실행해 검증하지 않는다(참고 신호 — 한계 명시). */}
+          {autoTest.totalCount > 0 && (
+            <IntegrityNote>
+              ⚠ 자동 테스트 통과 수는 학생 브라우저(WebContainer)에서 실행된 결과를 그대로
+              반영합니다 — 서버가 다시 실행해 검증하지 않으므로, 이 점수 축은 무결성에 한계가
+              있습니다(참고 신호).
+            </IntegrityNote>
+          )}
+          {/* 출제 함정 고지: 테스트가 없는데 테스트 비중이 남아 있으면 그 축이 0점이 되어
+              최종 점수가 루브릭 비중만큼으로 깎인다(#4 — 학생이 사유를 알 수 있게 명시). */}
+          {autoTest.totalCount === 0 && weights.tests > 0 && (
+            <IntegrityNote>
+              ⚠ 이 과제에는 자동 테스트가 없는데 테스트 비중이 {formatPercent(weights.tests)}로
+              설정돼 있어 테스트 축이 0점으로 처리됩니다 — 최종 점수는 최대{' '}
+              {Math.round(weights.rubric * 100)}점입니다.
+            </IntegrityNote>
+          )}
 
           <SectionTitle>
             자동 테스트 상세
@@ -308,6 +352,14 @@ const BreakdownTotal = styled.div`
     color: ${({ theme }) => theme.colors.text};
     font-variant-numeric: tabular-nums;
   }
+`;
+
+// 무결성/한계 고지 — 점수 산출표 아래 작은 경고 문구(자동 테스트 신뢰 한계·테스트 0 비중).
+const IntegrityNote = styled.p`
+  margin: ${({ theme }) => theme.spacing.sm} 0 0;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  line-height: 1.5;
 `;
 
 // ── 자동 테스트 상세 ──────────────────────────────────────────────────────────

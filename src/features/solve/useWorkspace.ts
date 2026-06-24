@@ -27,6 +27,8 @@ import type {
   ApiEndpoint,
   ApiLogEntry,
   AutoTestResult,
+  MlEvalResult,
+  MlSpec,
   ProjectFiles,
 } from '@/shared/core/types';
 import {
@@ -40,6 +42,7 @@ import {
   killDevServer,
   mountProjectFiles,
   runCommand,
+  runScoreEval,
   sendHttpRequest,
   startDevServer,
   watchContainerFile,
@@ -75,6 +78,17 @@ export interface BrowserConsoleEntry {
   message: string;
   /** 수신 시각(ms) — key·정렬용 */
   timestamp: number;
+}
+
+/**
+ * ML 챌린지 워크스페이스 설정 — kind === 'ml'일 때만 주어진다(없으면 워크스페이스 과제).
+ * 주어지면 dev 서버(미리보기)를 띄우지 않고, runEvaluation으로 숨긴 test셋을 주입·평가한다.
+ */
+export interface WorkspaceMlConfig {
+  /** 평가지표·임계값·seed·평가 명령(MlSpec). */
+  spec: MlSpec;
+  /** 숨긴 test 파일트리(채점 시점에만 mount). ChallengeProblem.testFiles. */
+  testFiles: ProjectFiles;
 }
 
 export interface UseWorkspaceResult {
@@ -123,6 +137,20 @@ export interface UseWorkspaceResult {
   isRunningTests: boolean;
   /** 테스트 실행 실패 메시지(타임아웃·결과 파일 부재 등, 정상 실행이면 null) */
   testErrorMessage: string | null;
+
+  // ── ML 평가 (성능 점수) ──
+  /**
+   * ML 챌린지 평가 — 숨긴 test셋을 mount하고 evalCommand를 실행해 성능 지표를 회수한다.
+   * 최신 편집분을 먼저 FS에 반영한 뒤 평가하며, 결과는 evalResult로도 노출된다.
+   * ML 챌린지가 아니면(mlConfig 없음) null을 돌려준다. 실패 시 null.
+   */
+  runEvaluation: () => Promise<MlEvalResult | null>;
+  /** 마지막 평가 결과(지표값, 미실행이면 null) */
+  evalResult: MlEvalResult | null;
+  /** 평가 실행 중 여부 */
+  isRunningEval: boolean;
+  /** 평가 실패 메시지(센티넬 부재·타임아웃 등, 정상이면 null) */
+  evalErrorMessage: string | null;
 
   // ── 브라우저 콘솔 (미리보기 앱) ──
   /** 미리보기 앱이 출력한 console.* / 런타임 에러 항목(누적, 최대 MAX_CONSOLE_ENTRIES개). */
@@ -333,10 +361,14 @@ function computeFileDelta(
 
 // ── Hook ──────────────────────────────────────────────────────────────────
 
+/** ML 평가 타임아웃(ms) — 학습+추론은 npm test보다 길 수 있어 넉넉히 둔다(무한 루프 가드). */
+const ML_EVAL_TIMEOUT_MS = 120_000;
+
 export function useWorkspace(
   template: ProjectFiles,
   lockedPaths: readonly string[] = [],
   challengeId?: string,
+  mlConfig?: WorkspaceMlConfig,
 ): UseWorkspaceResult {
   // 시퀀스가 한 번만 시작되도록 가드(StrictMode 이펙트 2회 실행 방지).
   const hasStartedRef = useRef(false);
@@ -374,6 +406,12 @@ export function useWorkspace(
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [testErrorMessage, setTestErrorMessage] = useState<string | null>(null);
   const isRunningTestsRef = useRef(false);
+
+  // ML 평가(성능 점수) 상태. 중복 실행은 ref로 가드한다.
+  const [evalResult, setEvalResult] = useState<MlEvalResult | null>(null);
+  const [isRunningEval, setIsRunningEval] = useState(false);
+  const [evalErrorMessage, setEvalErrorMessage] = useState<string | null>(null);
+  const isRunningEvalRef = useRef(false);
 
   // 브라우저 콘솔(미리보기 앱)에서 postMessage로 받은 console.*/에러 항목.
   const [consoleEntries, setConsoleEntries] = useState<BrowserConsoleEntry[]>([]);
@@ -699,6 +737,56 @@ export function useWorkspace(
     }
   }, [appendLog]);
 
+  // ML 평가 — 숨긴 test셋을 주입하고 evalCommand를 실행해 성능 지표를 회수한다.
+  // 평가 직전에 현재 편집 버퍼를 FS에 다시 mount해 최신 model.mjs가 반영되게 하고,
+  // 이어서 testFiles를 additive mount한다(학생 편집분 위에 얹혀 덮어쓸 수 없음). seed는
+  // env(DESPY_SEED)로 주입해 재현성을 확보한다.
+  const runEvaluation = useCallback(async (): Promise<MlEvalResult | null> => {
+    if (!mlConfig) return null;
+    if (isRunningEvalRef.current) {
+      throw new Error('평가가 이미 실행 중입니다.');
+    }
+    isRunningEvalRef.current = true;
+    setIsRunningEval(true);
+    setEvalErrorMessage(null);
+    appendLog('[despy] 숨겨진 test셋 주입 + 평가 실행 중…\n');
+
+    try {
+      // 최신 편집분을 FS에 반영(debounce 대기 중인 쓰기가 있어도 평가에 반영되게).
+      await mountProjectFiles(filesRef.current);
+      // 숨긴 test셋을 채점 시점에만 주입(학생 파일트리에 노출되지 않음).
+      await mountProjectFiles(mlConfig.testFiles);
+
+      const [command, ...args] = mlConfig.spec.evalCommand.split(' ').filter(Boolean);
+      const outcome = await runScoreEval(command ?? 'node', args, {
+        onOutput: appendLog,
+        timeoutMs: ML_EVAL_TIMEOUT_MS,
+        env: { DESPY_SEED: String(mlConfig.spec.seed) },
+      });
+
+      if (!outcome.ok || !outcome.result) {
+        const message = outcome.error ?? '평가에 실패했습니다.';
+        setEvalErrorMessage(message);
+        appendLog(`[despy] 평가 실패: ${message}\n`);
+        return null;
+      }
+      setEvalResult(outcome.result);
+      appendLog(
+        `[despy] 평가 완료 — ${outcome.result.metric} ${outcome.result.value}\n`,
+      );
+      return outcome.result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setEvalErrorMessage(message);
+      appendLog(`[despy] 평가 실패: ${message}\n`);
+      logger.error('[useWorkspace] 평가 실행 실패', error);
+      return null;
+    } finally {
+      isRunningEvalRef.current = false;
+      setIsRunningEval(false);
+    }
+  }, [mlConfig, appendLog]);
+
   const start = useCallback(async () => {
     try {
       // 재진입 여부를 확인한다 — 재진입이면 WebContainer가 이미 살아 있으므로
@@ -750,6 +838,17 @@ export function useWorkspace(
         }
       }
 
+      // ML 챌린지는 dev 서버(미리보기)가 없다 — install 후 바로 준비 완료로 두고,
+      // 학생이 model.mjs를 수정한 뒤 '성능 점수' 탭의 평가를 실행하게 한다.
+      if (mlConfig) {
+        setPreviewUrl(null);
+        setPhase('ready');
+        appendLog(
+          '[despy] ML 워크스페이스 준비 완료 — model.mjs를 수정하고 성능 점수 탭에서 평가하세요.\n',
+        );
+        return;
+      }
+
       setPhase('starting');
       appendLog('[despy] npm run dev 시작…\n');
       // 풀스택 템플릿은 프론트·백 두 포트가 server-ready를 내므로 프론트 포트만 골라
@@ -770,7 +869,7 @@ export function useWorkspace(
       setPhase('error');
       logger.error('[useWorkspace] 워크스페이스 시작 실패', error);
     }
-  }, [template, challengeId, appendLog, handleDevOutput, refreshApiData]);
+  }, [template, challengeId, appendLog, handleDevOutput, refreshApiData, mlConfig]);
 
   useEffect(() => {
     if (hasStartedRef.current) return;
@@ -878,6 +977,10 @@ export function useWorkspace(
     testResult,
     isRunningTests,
     testErrorMessage,
+    runEvaluation,
+    evalResult,
+    isRunningEval,
+    evalErrorMessage,
     consoleEntries,
     clearConsole,
     apiConsole,

@@ -18,7 +18,15 @@ import type {
   ApiConsoleResponse,
   ApiLogEntry,
   AutoTestResult,
+  MlEvalResult,
+  MlMetric,
 } from '@/shared/core/types';
+import {
+  formatMlValue,
+  isMlPassing,
+  mlMetricMeta,
+  mlScoreRatio,
+} from '@/shared/lib/grader/mlScore';
 import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
@@ -91,7 +99,8 @@ type WorkspaceTab =
   | 'db'
   | 'console'
   | 'browser'
-  | 'test';
+  | 'test'
+  | 'score';
 
 interface WorkspacePanelProps {
   phase: WorkspacePhase;
@@ -109,6 +118,21 @@ interface WorkspacePanelProps {
   testErrorMessage: string | null;
   /** '테스트 실행' 요청 콜백 */
   onRunTests: () => void;
+
+  // ── ML 성능 점수 ──
+  /**
+   * ML 챌린지면 평가지표·합격 임계값을 담는다(없으면 일반 워크스페이스 — 성능 탭 숨김·
+   * 테스트 탭 표시). 있으면 미리보기·테스트 탭 대신 '성능 점수' 탭을 주 화면으로 보여준다.
+   */
+  mlConfig?: { metric: MlMetric; passThreshold: number } | null;
+  /** 마지막 평가 결과(지표값, 미실행이면 null). */
+  evalResult?: MlEvalResult | null;
+  /** 평가 실행 중 여부. */
+  isRunningEval?: boolean;
+  /** 평가 실패 메시지(정상이면 null). */
+  evalErrorMessage?: string | null;
+  /** '평가 실행' 요청 콜백. */
+  onRunEvaluation?: () => void;
 
   // ── 브라우저 콘솔 (미리보기 앱) ──
   /** 미리보기 앱이 출력한 console.* / 런타임 에러 항목. */
@@ -153,6 +177,11 @@ export function WorkspacePanel({
   isRunningTests,
   testErrorMessage,
   onRunTests,
+  mlConfig,
+  evalResult,
+  isRunningEval = false,
+  evalErrorMessage,
+  onRunEvaluation,
   consoleEntries,
   onClearConsole,
   apiConsole,
@@ -165,13 +194,16 @@ export function WorkspacePanel({
   onRefreshApiData,
   onResetData,
 }: WorkspacePanelProps) {
+  // ML 챌린지(mlConfig 있음)는 미리보기·테스트 대신 '성능 점수' 탭을 주 화면으로 쓴다.
+  const isMl = mlConfig != null;
   // 백엔드 단독(프론트 미리보기 없음)이면 미리보기(raw JSON) 대신 데이터 테이블을 주 탭으로,
   // 미리보기 탭은 숨긴다. 풀스택(프론트 있음)은 미리보기·데이터 탭을 모두 노출한다.
   const isBackendOnly = apiConsole?.isPrimaryView ?? false;
-  const showPreviewTab = !isBackendOnly;
+  const showPreviewTab = !isBackendOnly && !isMl;
   const showDataTab = apiConsole != null;
+  const showTestTab = !isMl;
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(
-    isBackendOnly ? 'data' : 'preview',
+    isMl ? 'score' : isBackendOnly ? 'data' : 'preview',
   );
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const browserEndRef = useRef<HTMLDivElement>(null);
@@ -189,6 +221,12 @@ export function WorkspacePanel({
   const meta = PHASE_META[phase];
   // 테스트는 의존성 설치가 끝난 ready 상태에서만 실행 가능.
   const canRunTests = phase === 'ready' && !isRunningTests;
+  // ML 평가도 준비 완료 후에만 실행 가능. 결과가 있으면 metric 방향으로 합격을 판정한다.
+  const canRunEval = phase === 'ready' && !isRunningEval;
+  const evalPassed =
+    mlConfig && evalResult
+      ? isMlPassing(mlConfig.metric, evalResult.value, mlConfig.passThreshold)
+      : false;
 
   return (
     <Panel
@@ -225,15 +263,24 @@ export function WorkspacePanel({
               DB 상태
             </Tab>
           )}
+          {isMl && (
+            <Tab $active={activeTab === 'score'} onClick={() => setActiveTab('score')}>
+              성능 점수
+            </Tab>
+          )}
           <Tab $active={activeTab === 'console'} onClick={() => setActiveTab('console')}>
             콘솔
           </Tab>
-          <Tab $active={activeTab === 'browser'} onClick={() => setActiveTab('browser')}>
-            브라우저
-          </Tab>
-          <Tab $active={activeTab === 'test'} onClick={() => setActiveTab('test')}>
-            테스트
-          </Tab>
+          {!isMl && (
+            <Tab $active={activeTab === 'browser'} onClick={() => setActiveTab('browser')}>
+              브라우저
+            </Tab>
+          )}
+          {showTestTab && (
+            <Tab $active={activeTab === 'test'} onClick={() => setActiveTab('test')}>
+              테스트
+            </Tab>
+          )}
           {phase === 'error' && (
             <Button variant="ghost" onClick={onRetry}>
               다시 시작
@@ -396,6 +443,70 @@ export function WorkspacePanel({
               ) : (
                 <TestCentered>
                   <StatusHint>‘테스트 실행’을 눌러 자동 테스트를 실행하세요.</StatusHint>
+                </TestCentered>
+              )}
+            </TestBody>
+          </TestView>
+        )}
+
+        {activeTab === 'score' && mlConfig && (
+          <TestView>
+            <TestToolbar>
+              <Button onClick={onRunEvaluation} disabled={!canRunEval}>
+                {isRunningEval ? '평가 실행 중…' : '평가 실행'}
+              </Button>
+              {evalResult && (
+                <Badge tone={evalPassed ? 'success' : 'danger'}>
+                  {evalPassed ? '합격' : '불합격'}
+                </Badge>
+              )}
+              {phase !== 'ready' && !isRunningEval && (
+                <TestHint>워크스페이스가 준비되면 실행할 수 있습니다.</TestHint>
+              )}
+            </TestToolbar>
+
+            <TestBody>
+              {evalErrorMessage ? (
+                <TestError>{evalErrorMessage}</TestError>
+              ) : isRunningEval && !evalResult ? (
+                <TestCentered>
+                  <Spinner />
+                  <StatusHint>모델 학습 + 숨겨진 test셋 평가 중…</StatusHint>
+                </TestCentered>
+              ) : evalResult ? (
+                <ScoreCard>
+                  <ScoreMetricLabel>
+                    {mlMetricMeta(mlConfig.metric).label}
+                  </ScoreMetricLabel>
+                  <ScoreValue $tone={evalPassed ? 'success' : 'danger'}>
+                    {formatMlValue(evalResult.metric, evalResult.value)}
+                  </ScoreValue>
+                  <ScoreThreshold>
+                    합격 기준{' '}
+                    {mlMetricMeta(mlConfig.metric).higherIsBetter ? '≥' : '≤'}{' '}
+                    {formatMlValue(mlConfig.metric, mlConfig.passThreshold)}
+                  </ScoreThreshold>
+                  <ScoreGaugeTrack>
+                    <ScoreGaugeFill
+                      $percent={
+                        mlScoreRatio(
+                          mlConfig.metric,
+                          evalResult.value,
+                          mlConfig.passThreshold,
+                        ) * 100
+                      }
+                      $tone={evalPassed ? 'success' : 'danger'}
+                    />
+                  </ScoreGaugeTrack>
+                  <StatusHint>
+                    숨겨진 test셋으로 계산된 점수입니다(브라우저 컨테이너 — 서버 재검증 아님).
+                  </StatusHint>
+                </ScoreCard>
+              ) : (
+                <TestCentered>
+                  <StatusHint>
+                    ‘평가 실행’을 눌러 숨겨진 test셋으로 성능을 확인하세요.
+                  </StatusHint>
                 </TestCentered>
               )}
             </TestBody>
@@ -686,6 +797,58 @@ const CaseMessage = styled.pre`
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+`;
+
+// ── 성능 점수 탭 ───────────────────────────────────────────────────────────
+
+const ScoreCard = styled.div`
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  text-align: center;
+`;
+
+const ScoreMetricLabel = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.textMuted};
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+`;
+
+const ScoreValue = styled.span<{ $tone: 'success' | 'danger' }>`
+  font-size: 44px;
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  font-variant-numeric: tabular-nums;
+  color: ${({ theme, $tone }) =>
+    $tone === 'success' ? theme.colors.success : theme.colors.danger};
+`;
+
+const ScoreThreshold = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const ScoreGaugeTrack = styled.div`
+  width: 100%;
+  max-width: 280px;
+  height: 8px;
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: ${({ theme }) => theme.spacing.xs};
+`;
+
+const ScoreGaugeFill = styled.div<{ $percent: number; $tone: 'success' | 'danger' }>`
+  height: 100%;
+  width: ${({ $percent }) => Math.min(Math.max($percent, 0), 100)}%;
+  background: ${({ theme, $tone }) =>
+    $tone === 'success' ? theme.colors.success : theme.colors.danger};
+  border-radius: 4px;
+  transition: width 0.5s ease;
 `;
 
 // ── 프로그레스 스텝 ─────────────────────────────────────────────────────────

@@ -20,8 +20,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ChallengeGradingResult, ProjectFiles } from '@/shared/core/types';
-import type { IntegrityLog } from '@/shared/lib/hooks/useProctoringMonitor';
+import type { ChallengeGradingResult, IntegrityLog, ProjectFiles } from '@/shared/core/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -95,11 +94,9 @@ export const useSubmissionStore = create<SubmissionStoreState>()(
     {
       name: 'despy-submissions',
       version: 2,
-      migrate: (state, version) => {
-        // v1 → v2: integrityLog 필드 추가(optional이라 기존 제출은 그대로 사용 가능).
-        if (version < 2) return state;
-        return state;
-      },
+      // v2: integrityLog(시험 감독 로그)는 optional·additive 필드라 기존 v1 제출을
+      // 변환 없이 그대로 수용한다. 데이터 변환이 없어 version만 올려 스키마 변경을 기록.
+      migrate: (state) => state,
     },
   ),
 );

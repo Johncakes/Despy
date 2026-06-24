@@ -23,10 +23,12 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import styled, { css, keyframes } from 'styled-components';
 import type {
+  AutoTestResult,
+  ChallengeGradingRequest,
   ChallengeGradingResult,
   ChallengeProblem,
   ProjectFiles,
@@ -39,6 +41,11 @@ import {
   type SubmissionPromptTurn,
 } from '@/shared/core/stores/submissionStore';
 import { useProctoringMonitor } from '@/shared/lib/hooks/useProctoringMonitor';
+import {
+  FullscreenPrompt,
+  ProctoringNotice,
+  AnomalyBadge,
+} from '@/features/solve/components/ProctoringControls';
 import { applyFileEdit, type FileEdit } from '@/shared/lib/utils/markdownCode';
 import { useWorkspace } from '@/features/solve/useWorkspace';
 import {
@@ -71,24 +78,36 @@ function collectChangedFiles(
   return changed;
 }
 
+/** ML 챌린지 제출의 객관 축은 성능 점수(mlScore)다 — 자동 테스트는 비운다(채점에서 무시). */
+const EMPTY_AUTO_TEST: AutoTestResult = { passedCount: 0, totalCount: 0, cases: [] };
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem }) {
   const router = useRouter();
+  // ML 챌린지면 평가 설정(MlSpec + 숨긴 test셋)을 워크스페이스에 넘긴다 — dev 서버를
+  // 띄우지 않고 runEvaluation으로 성능을 채점한다. 일반 과제는 undefined.
+  const mlConfig = useMemo(
+    () =>
+      challenge.kind === 'ml' && challenge.ml
+        ? { spec: challenge.ml, testFiles: challenge.testFiles }
+        : undefined,
+    [challenge.kind, challenge.ml, challenge.testFiles],
+  );
   const workspace = useWorkspace(
     challenge.template,
     challenge.lockedPaths,
     challenge.id,
+    mlConfig,
   );
   const { writeFile, activePath, files, testResult, runTests } = workspace;
+  const { runEvaluation, evalResult } = workspace;
   // AI 사용량은 워크스페이스(영속, P4)에서 읽는다 — 새로고침해도 유지된다.
   const { questionsUsed, tokensUsed, recordAiTurn } = workspace;
   // 제출자 신원은 로그인 세션에서 가져온다 — 학생이 직접 타이핑하지 않는다(위장 방지).
   const { data: currentUser } = useCurrentUser();
   const grade = useGradeChallenge();
   const { log: integrityLog, isFullscreen, requestFullscreen, getLog } = useProctoringMonitor();
-  const totalAnomalies =
-    integrityLog.tabSwitchCount + integrityLog.externalPasteCount + integrityLog.fullscreenExitCount;
 
   // 패널 토글 상태(UI 전용 — 영속 대상 아님)
   const [isAiOpen, setIsAiOpen] = useState(true);
@@ -222,9 +241,30 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
     setSubmitError(null);
     setElapsedSeconds(0); // 진행 오버레이 경과 시간 초기화(처리 시작 시점).
     try {
-      // autoTest는 채점의 필수 신호다 — 아직 안 돌렸으면 제출 전에 한 번 실행한다(§7.2).
-      // runTests가 실패하면(타임아웃 등) throw되어 아래 catch에서 제출을 중단한다.
-      const autoTest = testResult ?? (await runTests());
+      // 객관 축 신호를 준비한다 — ML은 성능 평가(숨긴 test셋), 일반 과제는 자동 테스트.
+      let autoTest: AutoTestResult = EMPTY_AUTO_TEST;
+      let mlScore: ChallengeGradingRequest['mlScore'];
+      if (challenge.kind === 'ml' && challenge.ml) {
+        // 이미 '성능 점수' 탭에서 평가했으면 그 값을, 아니면 지금 평가를 실행한다.
+        const evalRes = evalResult ?? (await runEvaluation());
+        if (!evalRes) {
+          setSubmitError(
+            workspace.evalErrorMessage ??
+              '성능 평가에 실패했습니다. model.mjs가 올바른지 확인하세요.',
+          );
+          return;
+        }
+        mlScore = {
+          metric: evalRes.metric,
+          value: evalRes.value,
+          passThreshold: challenge.ml.passThreshold,
+        };
+      } else {
+        // autoTest는 채점의 필수 신호다 — 아직 안 돌렸으면 제출 전에 한 번 실행한다(§7.2).
+        // runTests가 실패하면(타임아웃 등) throw되어 아래 catch에서 제출을 중단한다.
+        autoTest = testResult ?? (await runTests());
+      }
+
       const submittedFiles = collectChangedFiles(
         files,
         challenge.template,
@@ -236,6 +276,8 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         rubric: challenge.rubric,
         submittedFiles,
         autoTest,
+        // ML 챌린지면 성능 점수(객관)를 함께 보내 서버가 합격 판정 + 최종 점수에 반영한다.
+        mlScore,
         // 모델은 과제 AI 정책을 따르되, aiPolicy.systemPrompt(답변 가드레일)는 채점
         // 가드레일이 아니므로 보내지 않는다 — grader의 기본 채점 프롬프트를 쓴다.
         model: challenge.aiPolicy.model,
@@ -258,25 +300,46 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
       const message = error instanceof Error ? error.message : String(error);
       setSubmitError(message);
     }
-  }, [testResult, runTests, files, challenge, grade, currentUser, questionsUsed, tokensUsed, getLog]);
+  }, [
+    testResult,
+    runTests,
+    evalResult,
+    runEvaluation,
+    workspace.evalErrorMessage,
+    files,
+    challenge,
+    grade,
+    currentUser,
+    questionsUsed,
+    tokensUsed,
+    getLog,
+  ]);
 
-  // 워크스페이스가 준비되어야(테스트 실행 가능) 제출할 수 있다.
+  // 워크스페이스가 준비되어야(테스트/평가 실행 가능) 제출할 수 있다.
   const isSubmitting = grade.isPending;
   const canSubmit =
-    workspace.phase === 'ready' && !isSubmitting && !workspace.isRunningTests;
+    workspace.phase === 'ready' &&
+    !isSubmitting &&
+    !workspace.isRunningTests &&
+    !workspace.isRunningEval;
   const submitLabel = isSubmitting
     ? '채점 중…'
-    : workspace.isRunningTests
-      ? '테스트 실행 중…'
-      : '제출';
+    : workspace.isRunningEval
+      ? '평가 실행 중…'
+      : workspace.isRunningTests
+        ? '테스트 실행 중…'
+        : '제출';
 
-  // 제출 처리(테스트 실행 → AI 채점)는 응답까지 수십 초 걸릴 수 있어, 진행 중임을
+  // 제출 처리(테스트/평가 실행 → AI 채점)는 응답까지 수십 초 걸릴 수 있어, 진행 중임을
   // 정직하게 알리는 오버레이를 띄운다. 단발 LLM 호출이라 실제 진척 %는 없으므로
   // 현재 단계 라벨 + 경과 시간으로 "멈춘 게 아니라 동작 중"임을 전한다.
-  const isProcessingSubmit = isSubmitting || workspace.isRunningTests;
-  const progressStageLabel = workspace.isRunningTests
-    ? '자동 테스트 실행 중…'
-    : 'AI가 채점하는 중…';
+  const isProcessingSubmit =
+    isSubmitting || workspace.isRunningTests || workspace.isRunningEval;
+  const progressStageLabel = workspace.isRunningEval
+    ? '모델 학습 + 성능 평가 실행 중…'
+    : workspace.isRunningTests
+      ? '자동 테스트 실행 중…'
+      : 'AI가 채점하는 중…';
   // 경과 시간 카운터는 처리 중일 때만 1초마다 갱신한다. 0으로의 리셋은 제출 시작
   // 시점(handleSubmit)에서 하고, 여기서는 비동기 콜백으로만 setState 한다
   // (effect 본문에서의 동기 setState 금지 규칙).
@@ -291,24 +354,12 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
 
   return (
     <Wrapper>
-      {!isFullscreen && (
-        <FullscreenBanner>
-          시험 모드를 위해 전체화면을 권장합니다.
-          <FullscreenButton type="button" onClick={requestFullscreen}>
-            전체화면 시작
-          </FullscreenButton>
-        </FullscreenBanner>
-      )}
+      <FullscreenPrompt isFullscreen={isFullscreen} onRequestFullscreen={requestFullscreen} />
+      <ProctoringNotice reportedToInstructor />
       <TopBar>
         <BackButton type="button" onClick={handleBackToList}>← 목록</BackButton>
         <Title>{challenge.title}</Title>
-        {totalAnomalies > 0 && (
-          <AnomalyBadge
-            title={`탭 이탈 ${integrityLog.tabSwitchCount}회 · 외부 붙여넣기 ${integrityLog.externalPasteCount}회 · 전체화면 이탈 ${integrityLog.fullscreenExitCount}회`}
-          >
-            ⚠ {totalAnomalies}
-          </AnomalyBadge>
-        )}
+        <AnomalyBadge log={integrityLog} />
         {submitError && <ErrorText title={submitError}>{submitError}</ErrorText>}
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
@@ -378,6 +429,18 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               isRunningTests={workspace.isRunningTests}
               testErrorMessage={workspace.testErrorMessage}
               onRunTests={() => void workspace.runTests()}
+              mlConfig={
+                challenge.kind === 'ml' && challenge.ml
+                  ? {
+                      metric: challenge.ml.metric,
+                      passThreshold: challenge.ml.passThreshold,
+                    }
+                  : null
+              }
+              evalResult={workspace.evalResult}
+              isRunningEval={workspace.isRunningEval}
+              evalErrorMessage={workspace.evalErrorMessage}
+              onRunEvaluation={() => void workspace.runEvaluation()}
               consoleEntries={workspace.consoleEntries}
               onClearConsole={workspace.clearConsole}
               apiConsole={workspace.apiConsole}
@@ -528,42 +591,6 @@ const EditorArea = styled.div`
 const PreviewArea = styled.div`
   flex: 1;
   min-height: 0;
-`;
-
-const FullscreenBanner = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: ${({ theme }) => theme.spacing.sm};
-  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.md}`};
-  background: ${({ theme }) => theme.colors.surfaceAlt};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-const FullscreenButton = styled.button`
-  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  font-family: inherit;
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.primary};
-  background: transparent;
-  border: 1px solid ${({ theme }) => theme.colors.primary};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  cursor: pointer;
-`;
-
-const AnomalyBadge = styled.span`
-  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
-  font-size: ${({ theme }) => theme.font.sizeXs};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.warning};
-  border: 1px solid ${({ theme }) => theme.colors.warning};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  cursor: default;
-  white-space: nowrap;
 `;
 
 // ── 채점 진행 오버레이 ──────────────────────────────────────────────────────

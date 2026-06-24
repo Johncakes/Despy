@@ -122,20 +122,29 @@ export function normalizeAlgorithmResult(
 // ── 가중합 ───────────────────────────────────────────────────────────────────
 
 /**
- * 자동 테스트 통과율과 루브릭 점수율을 weights로 가중합한 0~100 최종 점수.
+ * 객관 축(자동 테스트 통과율)과 루브릭 점수율을 weights로 가중합한 0~100 최종 점수.
  * 분모 0(테스트/항목 없음)은 0%로 처리하고 정수로 반올림한다.
+ *
+ * ML 챌린지는 객관 축이 자동 테스트가 아니라 성능 지표다. 이때 objectiveRatioOverride에
+ * 성능 지표를 [0,1]로 환산한 값(mlScore.mlScoreRatio)을 넘기면, testsRatio 대신 그 값을
+ * weights.tests 자리에 넣어 가중합한다(루브릭 축은 동일). 워크스페이스 과제는 생략한다.
  */
 export function computeFinalScore(
   autoTest: AutoTestResult,
   rubric: RubricGradingResult,
   weights: GradingRubric['weights'],
+  objectiveRatioOverride?: number,
 ): number {
-  const testsRatio =
-    autoTest.totalCount > 0 ? autoTest.passedCount / autoTest.totalCount : 0;
+  const objectiveRatio =
+    objectiveRatioOverride !== undefined
+      ? clamp(objectiveRatioOverride, 0, 1)
+      : autoTest.totalCount > 0
+        ? autoTest.passedCount / autoTest.totalCount
+        : 0;
   const rubricRatio =
     rubric.maxScore > 0 ? rubric.totalScore / rubric.maxScore : 0;
 
-  const weighted = testsRatio * weights.tests + rubricRatio * weights.rubric;
+  const weighted = objectiveRatio * weights.tests + rubricRatio * weights.rubric;
   return Math.round(clamp(weighted, 0, 1) * 100);
 }
 

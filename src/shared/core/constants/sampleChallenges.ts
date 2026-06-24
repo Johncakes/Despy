@@ -19,6 +19,12 @@ import {
   EXPRESS_TODO_API_LOCKED_PATHS,
   FULLSTACK_TODO_TEMPLATE,
   FULLSTACK_TODO_LOCKED_PATHS,
+  ML_CLASSIFICATION_TEMPLATE,
+  ML_CLASSIFICATION_TEST_FILES,
+  ML_CLASSIFICATION_LOCKED_PATHS,
+  ML_REGRESSION_TEMPLATE,
+  ML_REGRESSION_TEST_FILES,
+  ML_REGRESSION_LOCKED_PATHS,
 } from '@/shared/core/constants/webcontainerTemplates';
 
 export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
@@ -307,6 +313,157 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
         },
       ],
       weights: { tests: 0.4, rubric: 0.6 },
+    },
+
+    aiPolicy: { ...DEFAULT_AI_POLICY },
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: 'sample-ml-iris-classification',
+    kind: 'ml',
+    title: 'ML 분류 — 꽃 품종 맞히기 (TensorFlow.js)',
+    statement: [
+      '꽃받침/꽃잎 수치 4개로 품종(3종, 0·1·2)을 맞히는 **분류 모델**을 TensorFlow.js로 만드세요.',
+      'AI 도우미를 활용해 모델 구조·하이퍼파라미터를 설계하고, 숨겨진 test셋 **정확도**로 채점받습니다.',
+      '',
+      '### 작업',
+      '- `model.mjs`의 `buildModel`(구조)과 `TRAIN_CONFIG`(학습 설정)을 고쳐 정확도를 끌어올린다.',
+      '- `train.mjs`를 콘솔에서 돌려(`node train.mjs`) train 정확도를 보며 반복한다.',
+      '- **성능 점수** 탭의 "평가 실행"으로 숨겨진 test셋 정확도를 확인한다(제출도 같은 값으로 채점).',
+      '',
+      '### 채점',
+      '- **객관(성능)**: 숨겨진 test셋 정확도 ≥ **85%**면 합격. 고정 seed로 점수 변동을 줄인다.',
+      '- **정성(AI 활용)**: 제한된 AI를 어떻게 활용해 모델을 설계·개선했는지 대화·코드로 평가한다.',
+      '',
+      '### 계약 (잠금)',
+      '- `data.mjs`(로더)·`eval.mjs`(채점)·`data/train.csv`·`package.json`은 **잠겨 있다**.',
+      '- 숨겨진 test 데이터는 화면에 보이지 않으며 채점 시점에만 주입된다(직접 조작 불가).',
+    ].join('\n'),
+
+    ml: {
+      metric: 'accuracy',
+      passThreshold: 0.85,
+      seed: 42,
+      trainDataPath: 'data/train.csv',
+      testDataPath: 'data/test.csv',
+      evalCommand: 'node eval.mjs',
+    },
+
+    template: ML_CLASSIFICATION_TEMPLATE,
+    lockedPaths: [...ML_CLASSIFICATION_LOCKED_PATHS],
+    editablePaths: ['model.mjs', 'train.mjs'],
+
+    setupCommands: ['npm install'],
+    // ML 챌린지는 dev 서버(미리보기)가 없다. 채점은 eval(성능 점수)로 한다.
+    devCommand: '',
+    testCommand: '',
+
+    // 숨긴 test셋 — 채점(평가) 시점에만 컨테이너에 주입된다(학생 비노출).
+    testFiles: ML_CLASSIFICATION_TEST_FILES,
+    rubric: {
+      criteria: [
+        {
+          id: 'ai-guided-modeling',
+          description:
+            'AI 지시 의도가 코드에 드러난다 — 모델 구조·하이퍼파라미터 선택이 피처·클래스·정확도 목표를 의식한 설계임을 코드에서 읽을 수 있다.',
+          maxScore: 50,
+          rationale:
+            '성능 자체는 객관 축(정확도)이 채점하므로, 루브릭은 "제한된 AI를 어떻게 부려 모델을 만들었나"의 과정을 코드에서 평가한다.',
+          levels: [
+            { score: 50, descriptor: '지표·도메인 맥락에 맞게 구조·하이퍼파라미터를 구체적으로 설계한 흔적이 코드에 분명하다.' },
+            { score: 28, descriptor: '기본 구조는 있으나 피처·목표에 맞춘 조정 흔적이 코드에 약하다.' },
+            { score: 0, descriptor: '보일러플레이트 수준이며 문제 맥락에 맞는 설계 의도가 코드에 없다.' },
+          ],
+        },
+        {
+          id: 'iteration-evidence',
+          description:
+            '반복 개선 흔적이 코드에 있다 — buildModel·TRAIN_CONFIG가 단순 기본값이 아니라 성능을 의식해 수정된 형태를 보인다.',
+          maxScore: 50,
+          levels: [
+            { score: 50, descriptor: '구조·하이퍼파라미터가 명확히 조정되었고 그 방향이 성능 향상과 일치한다.' },
+            { score: 28, descriptor: '일부 수정은 있으나 방향성·근거가 코드에서 약하다.' },
+            { score: 0, descriptor: '초기 보일러플레이트와 차이가 없고 개선 흔적이 없다.' },
+          ],
+        },
+      ],
+      // ML은 "tests" 가중치 슬롯이 성능(객관) 비중을 뜻한다(성능 60% + AI 활용 40%).
+      weights: { tests: 0.6, rubric: 0.4 },
+    },
+
+    aiPolicy: { ...DEFAULT_AI_POLICY },
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: 'sample-ml-house-regression',
+    kind: 'ml',
+    title: 'ML 회귀 — 주택 가격 예측 (TensorFlow.js)',
+    statement: [
+      '면적/방수/연식 3개 수치로 **가격(연속값)** 을 예측하는 **회귀 모델**을 TensorFlow.js로 만드세요.',
+      'AI 도우미를 활용해 모델을 설계하고, 숨겨진 test셋 **RMSE(낮을수록 좋음)** 로 채점받습니다.',
+      '',
+      '### 작업',
+      '- `model.mjs`의 `buildModel`(구조)과 `TRAIN_CONFIG`(학습 설정)을 고쳐 RMSE를 낮춘다.',
+      '- 피처 표준화는 `data.mjs`(잠금)가 처리하므로 모델 설계에 집중한다.',
+      '- `train.mjs`(`node train.mjs`)로 train RMSE를 보며 반복하고, **성능 점수** 탭에서 평가한다.',
+      '',
+      '### 채점',
+      '- **객관(성능)**: 숨겨진 test셋 RMSE ≤ **8.0**이면 합격(가격 단위, 낮을수록 좋음).',
+      '- **정성(AI 활용)**: 제한된 AI를 어떻게 활용해 모델을 설계·개선했는지 대화·코드로 평가한다.',
+      '',
+      '### 계약 (잠금)',
+      '- `data.mjs`(로더·표준화)·`eval.mjs`(채점)·`data/train.csv`·`package.json`은 **잠겨 있다**.',
+      '- 숨겨진 test 데이터는 화면에 보이지 않으며 채점 시점에만 주입된다(직접 조작 불가).',
+    ].join('\n'),
+
+    ml: {
+      metric: 'rmse',
+      passThreshold: 8.0,
+      seed: 42,
+      trainDataPath: 'data/train.csv',
+      testDataPath: 'data/test.csv',
+      evalCommand: 'node eval.mjs',
+    },
+
+    template: ML_REGRESSION_TEMPLATE,
+    lockedPaths: [...ML_REGRESSION_LOCKED_PATHS],
+    editablePaths: ['model.mjs', 'train.mjs'],
+
+    setupCommands: ['npm install'],
+    devCommand: '',
+    testCommand: '',
+
+    testFiles: ML_REGRESSION_TEST_FILES,
+    rubric: {
+      criteria: [
+        {
+          id: 'ai-guided-modeling',
+          description:
+            'AI 지시 의도가 코드에 드러난다 — 모델 구조·하이퍼파라미터 선택이 피처·타깃·RMSE 목표를 의식한 설계임을 코드에서 읽을 수 있다.',
+          maxScore: 50,
+          rationale:
+            '성능 자체는 객관 축(RMSE)이 채점하므로, 루브릭은 "제한된 AI를 어떻게 부려 모델을 만들었나"의 과정을 코드에서 평가한다.',
+          levels: [
+            { score: 50, descriptor: '지표·도메인 맥락에 맞게 구조·하이퍼파라미터를 구체적으로 설계한 흔적이 코드에 분명하다.' },
+            { score: 28, descriptor: '기본 구조는 있으나 피처·목표에 맞춘 조정 흔적이 코드에 약하다.' },
+            { score: 0, descriptor: '보일러플레이트 수준이며 문제 맥락에 맞는 설계 의도가 코드에 없다.' },
+          ],
+        },
+        {
+          id: 'iteration-evidence',
+          description:
+            '반복 개선 흔적이 코드에 있다 — buildModel·TRAIN_CONFIG가 단순 기본값이 아니라 성능을 의식해 수정된 형태를 보인다.',
+          maxScore: 50,
+          levels: [
+            { score: 50, descriptor: '구조·하이퍼파라미터가 명확히 조정되었고 그 방향이 성능 향상과 일치한다.' },
+            { score: 28, descriptor: '일부 수정은 있으나 방향성·근거가 코드에서 약하다.' },
+            { score: 0, descriptor: '초기 보일러플레이트와 차이가 없고 개선 흔적이 없다.' },
+          ],
+        },
+      ],
+      weights: { tests: 0.6, rubric: 0.4 },
     },
 
     aiPolicy: { ...DEFAULT_AI_POLICY },

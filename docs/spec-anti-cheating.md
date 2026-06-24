@@ -21,23 +21,27 @@ despy는 이미 AI 대화 트랜스크립트·코드 diff 타임라인·AI 사�
 | 항목 | 동작 | 저장 위치 |
 |---|---|---|
 | **탭 이탈** | `visibilitychange(hidden)` 횟수 + 숨김 누적 시간(ms) 카운트 | `integrityLog.tabSwitchCount / tabSwitchTotalMs` |
-| **외부 붙여넣기** | `document paste` 이벤트 중 30자 초과 텍스트 유입 횟수 | `integrityLog.externalPasteCount` |
-| **전체화면 이탈** | 전체화면 진입 후 나간 횟수 (`fullscreenchange`) | `integrityLog.fullscreenExitCount` |
+| **붙여넣기** | `document paste` 30자 초과 횟수 — 앱 내부 자기복사/외부 유입 구분 불가(약신호) | `integrityLog.externalPasteCount` |
+| **전체화면 이탈** | 전체화면 진입 후 나간 횟수 (`fullscreenchange`) — 정상 Esc·F11 오탐 다수라 **참고용(경고 합계 제외)** | `integrityLog.fullscreenExitCount` |
 | **전체화면 유도** | 풀이 화면 진입 시 전체화면 권장 배너 표시 | — |
-| **실시간 배지** | TopBar에 이상행위 합계 ⚠ n 배지 표시 | — |
+| **실시간 배지** | TopBar에 탭이탈+붙여넣기 합계 ⚠ n 배지(전체화면 이탈 제외) | — |
+| **행동 기록 고지** | 풀이 화면 상시 고지(추적·교수 제공 사실) — PIPA 정합 + deterrence | — |
 
 - 알고리즘 풀이(`SolveView`): 실시간 배지만 표시, 세션 내 억제 목적
 - 과제 풀이(`ChallengeSolveView`): 제출 시 `integrityLog`를 `submissionStore`에 저장
 - 교수 대시보드(`GradingDashboardView`): 제출 목록에 이상행위 횟수 컬럼, 상세 모달 헤더에 상세 내역
 
-### 임계값 (대시보드 색상)
+### 대시보드 표기 (색상 등급 없음)
 
-| 총 횟수 | 표시 |
+이상행위 합계 = 탭이탈 + 붙여넣기(전체화면 이탈 제외). 이 값은 **클라이언트 자기보고값이라
+위조·우회 가능**하므로 위험/경고 색상 등급을 매기지 않고 **중립 카운트**로만 표시하고
+'자기보고·위조 가능' 캡션을 단다(교수가 검증된 증거로 오인하지 않도록). 단정적 증거가 아니라
+프롬프트 타임라인·diff와 **교차검증할 보조 신호**다(§1·§6).
+
+| 합계 | 표시 |
 |---|---|
 | 0 | — (표시 없음) |
-| 1 | 회색 숫자 |
-| 2–4 | 경고색(warning) |
-| 5+ | 위험색(danger) |
+| 1+ | 중립색 숫자 + 자기보고·위조 가능 캡션(툴팁) |
 
 ---
 

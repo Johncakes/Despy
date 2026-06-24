@@ -36,6 +36,12 @@ const eslintConfig = [
               from: './src/shared/components',
               message: '레이어 위반: lib은 components를 import할 수 없습니다.',
             },
+            {
+              target: './src/shared/core',
+              from: './src/shared/lib',
+              message:
+                '레이어 위반: core는 lib을 import할 수 없습니다 (데이터 타입은 core/types에 두세요).',
+            },
           ],
         },
       ],

@@ -6,9 +6,9 @@
  * 교수 대시보드에서 사후 분석할 수 있도록 한다.
  *
  * 감지 항목:
- * - tabSwitchCount: visibilitychange(hidden) + window blur 횟수
+ * - tabSwitchCount: visibilitychange(hidden) 횟수
  * - tabSwitchTotalMs: 탭이 숨겨진 누적 시간(ms)
- * - externalPasteCount: 30자 초과 붙여넣기 횟수(외부 AI·코드 유입 휴리스틱)
+ * - externalPasteCount: 30자 초과 붙여넣기 횟수(약신호 — 앱 내부 자기복사/외부 유입을 구분하지 못함)
  * - fullscreenExitCount: 전체화면 이탈 횟수
  *
  * ⚠️ 억제(deterrence) 수준. 개발자도구·다른 기기로 우회 가능하며
@@ -17,19 +17,9 @@
  * 사용처: features/solve/SolveView, features/solve/ChallengeSolveView
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { IntegrityLog } from '@/shared/core/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
-
-export interface IntegrityLog {
-  /** visibilitychange(hidden) + window blur 감지 횟수 */
-  tabSwitchCount: number;
-  /** 탭이 숨겨진 누적 시간(ms) */
-  tabSwitchTotalMs: number;
-  /** 30자 초과 붙여넣기 횟수 */
-  externalPasteCount: number;
-  /** 전체화면 이탈 횟수(전체화면 진입 후 나간 경우만 카운트) */
-  fullscreenExitCount: number;
-}
 
 export interface ProctoringMonitor {
   /** 현재 누적 로그(리액티브 — 헤더 배지 표시용) */

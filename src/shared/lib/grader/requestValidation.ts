@@ -80,6 +80,31 @@ export function validateGradeRequest(body: unknown): string | null {
     return 'rubric.weights 합은 1.0이어야 합니다.';
   }
 
+  // ML 챌린지 성능 점수(선택) — 있으면 metric·value·passThreshold를 점검한다. 이 값이
+  // 최종 점수의 객관 축으로 들어가므로(computeFinalScore), 형식이 어긋나면 채점 전에 막는다.
+  if (body.mlScore !== undefined) {
+    const mlError = validateMlScore(body.mlScore);
+    if (mlError) return mlError;
+  }
+
+  return null;
+}
+
+/** mlScore(선택 필드)의 형식을 점검한다. 통과 시 null. */
+function validateMlScore(mlScore: unknown): string | null {
+  if (!isRecord(mlScore)) return 'mlScore가 올바르지 않습니다.';
+  if (mlScore.metric !== 'accuracy' && mlScore.metric !== 'rmse') {
+    return "mlScore.metric은 'accuracy' 또는 'rmse'여야 합니다.";
+  }
+  if (typeof mlScore.value !== 'number' || !Number.isFinite(mlScore.value)) {
+    return 'mlScore.value는 유한수여야 합니다.';
+  }
+  if (
+    typeof mlScore.passThreshold !== 'number' ||
+    !Number.isFinite(mlScore.passThreshold)
+  ) {
+    return 'mlScore.passThreshold는 유한수여야 합니다.';
+  }
   return null;
 }
 
