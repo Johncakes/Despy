@@ -76,18 +76,88 @@ export interface GradingRubric {
   };
 }
 
+// ── ML 챌린지 (TensorFlow.js) ──────────────────────────────────────────────
+//
+// 워크스페이스 과제와 같은 인프라(파일트리·제출·AI 채팅)를 재활용하되, "숨긴 test셋에
+// 대한 모델 성능"을 객관 지표로 채점하는 ML 전용 챌린지다. ChallengeProblem에 판별자
+// (kind)와 선택 필드(ml)를 얹어 확장한다(별도 store/타입 분리 대신 — docs/spec-ml-challenge.md §4).
+// 학생은 브라우저 WebContainer에서 pure @tensorflow/tfjs로 모델을 작성·학습하고, 제출 시
+// 컨테이너가 숨긴 test셋을 주입·평가해 점수 센티넬(__DESPY_SCORE__)로 회수한다.
+
+/** 과제 종류 판별자. 기존 워크스페이스 과제는 'workspace', ML 챌린지는 'ml'. */
+export type ChallengeKind = 'workspace' | 'ml';
+
+/**
+ * ML 평가지표. 'accuracy'는 분류(0~1, 높을수록 좋음), 'rmse'는 회귀(≥0, 낮을수록 좋음).
+ * 합격 판정 방향(≥/≤)·표시 형식·게이지는 metric에서 파생한다(shared/lib/grader/mlScore.ts).
+ */
+export type MlMetric = 'accuracy' | 'rmse';
+
+/**
+ * ML 챌린지 전용 설정 — kind === 'ml'일 때만 존재한다.
+ *
+ * 숨긴 test 데이터(testDataPath)는 ChallengeProblem.testFiles에 담겨 학생에게 노출되지
+ * 않고, 제출(채점) 시점에만 컨테이너 FS에 주입된다. seed 고정으로 동일 코드의 점수 변동을
+ * 제거해 공정성을 확보한다(완벽한 무결성은 아님 — 한계는 UI에 명시, §7).
+ */
+export interface MlSpec {
+  /** 평가지표 — 분류 정확도 또는 회귀 RMSE */
+  metric: MlMetric;
+  /** 합격 임계값 (accuracy면 ≥ 이 값, rmse면 ≤ 이 값) */
+  passThreshold: number;
+  /** 재현성을 위한 고정 seed (점수 변동성 제거) */
+  seed: number;
+  /** 학생 노출 train 데이터 경로(template 파일트리 내, 예: 'data/train.csv') */
+  trainDataPath: string;
+  /** 채점 시점에만 주입하는 숨긴 test 데이터 경로(testFiles에 포함, 예: 'data/test.csv') */
+  testDataPath: string;
+  /** 점수 센티넬을 출력하는 평가 진입점 (예: 'node eval.mjs') */
+  evalCommand: string;
+}
+
+/**
+ * 컨테이너 평가 실행의 원시 결과 — eval 스크립트가 __DESPY_SCORE__ 센티넬로 출력하고
+ * runtime.runScoreEval이 파싱한다. value는 metric의 원시 지표값(정확도 0~1 또는 RMSE).
+ */
+export interface MlEvalResult {
+  metric: MlMetric;
+  value: number;
+}
+
+/**
+ * ML 성능 채점 결과 — 컨테이너가 숨긴 test셋으로 산출한 객관 점수와 합격 여부.
+ * 정성(루브릭) 점수와 함께 ChallengeGradingResult에 담겨 최종 점수로 가중합된다.
+ */
+export interface MlGradingResult {
+  metric: MlMetric;
+  /** 컨테이너가 계산한 원시 지표값(정확도 0~1 또는 RMSE) */
+  value: number;
+  /** 합격 임계값(MlSpec.passThreshold) */
+  passThreshold: number;
+  /** metric 방향(accuracy ≥ / rmse ≤)에 따른 임계값 합격 여부 */
+  passed: boolean;
+}
+
 /**
  * 과제(Challenge). 교수가 출제하는 실무형 웹 과제의 단일 출처다.
  *
  * template은 학생에게 주어지는 시작 파일트리(주어진 백엔드/API 포함), testFiles는
  * 채점용 테스트(학생 비노출, 제출 시점에 주입). 채점 무결성을 위해 공식 점수는
  * 서버(/api/grade)가 testFiles로 재실행해 산출한다(§7.2).
+ *
+ * kind === 'ml'이면 ML 챌린지로, ml(MlSpec)이 채워지고 채점이 성능 지표(객관)+루브릭(정성)
+ * 2축이 된다. 워크스페이스 필드(template·testFiles·devCommand 등)는 ML도 그대로 재활용한다.
  */
 export interface ChallengeProblem {
   id: string;
   title: string;
   /** 마크다운 지문 (요구사항·시나리오) */
   statement: string;
+
+  /** 과제 종류 판별자(기존 데이터는 'workspace'로 migrate). */
+  kind: ChallengeKind;
+  /** ML 챌린지 전용 설정 — kind === 'ml'일 때만 존재. */
+  ml?: MlSpec;
 
   // ── 워크스페이스 ──
   /** 학생에게 주어지는 시작 파일트리 (주어진 백엔드/API 포함) */
@@ -231,11 +301,16 @@ export interface RubricGradingResult {
 
 /**
  * 종합 채점 결과 — 자동 테스트 + AI 루브릭을 weights로 가중합한 최종 점수.
+ *
+ * ML 챌린지(kind === 'ml')는 객관 축이 자동 테스트(autoTest) 대신 성능 지표(ml)다.
+ * 이때 finalScore는 성능 지표율을 tests 가중치 자리에 넣어 루브릭과 가중합한다(score.ts).
  */
 export interface ChallengeGradingResult {
   problemId: string;
   autoTest: AutoTestResult;
   rubric: RubricGradingResult;
+  /** ML 챌린지 성능 채점 결과(객관). 워크스페이스 과제면 생략. */
+  ml?: MlGradingResult;
   /** weights로 가중합한 최종 점수(0~100) */
   finalScore: number;
   submittedAt: number;
@@ -260,6 +335,12 @@ export interface ChallengeGradingRequest {
   diff?: string;
   /** WebContainer 자동 테스트 결과 (참고 신호) */
   autoTest: AutoTestResult;
+  /**
+   * ML 챌린지 성능 점수(객관) — 컨테이너가 숨긴 test셋으로 계산한 지표값 + 합격 임계값.
+   * kind === 'ml' 제출에만 담긴다. 서버는 이를 신뢰해 passed 판정 + 최종 점수에 반영한다
+   * (MVP — 컨테이너 계산 신뢰, 서버 재실행은 후속. docs/spec-ml-challenge.md §5·§8).
+   */
+  mlScore?: { metric: MlMetric; value: number; passThreshold: number };
   /** 채점 모델 id (미지정 시 서버 기본값) */
   model?: string;
   /** 채점 가드레일 시스템 프롬프트 (교수 설정) */
@@ -428,4 +509,27 @@ export interface AgentUsageMetadata {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+}
+
+// ── 시험 감독 (Proctoring) ───────────────────────────────────────────────────
+//
+// 학생이 풀이 화면을 벗어나거나 외부 내용을 붙여넣는 행위를 감지·카운트한 결과.
+// useProctoringMonitor(shared/lib/hooks)가 생성하고, 과제 제출 시 StoredSubmission에
+// 첨부되어 교수 대시보드에서 사후 분석된다. 데이터 타입이라 core에 둔다(core→lib 금지).
+
+/**
+ * 시험 감독 로그 — 탭 이탈·외부 붙여넣기·전체화면 이탈 카운트.
+ *
+ * ⚠️ 억제(deterrence) 수준의 지표다. 개발자도구·다른 기기로 우회 가능하며
+ *    확실한 차단은 Electron 앱이 필요하다(docs/spec-anti-cheating.md 참조).
+ */
+export interface IntegrityLog {
+  /** visibilitychange(hidden) + window blur 감지 횟수 */
+  tabSwitchCount: number;
+  /** 탭이 숨겨진 누적 시간(ms) */
+  tabSwitchTotalMs: number;
+  /** 30자 초과 붙여넣기 횟수 */
+  externalPasteCount: number;
+  /** 전체화면 이탈 횟수(전체화면 진입 후 나간 경우만 카운트) */
+  fullscreenExitCount: number;
 }

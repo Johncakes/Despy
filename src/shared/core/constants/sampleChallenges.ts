@@ -24,6 +24,7 @@ import {
 export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
   {
     id: 'sample-counter-vibe',
+    kind: 'workspace',
     title: '카운터에 "초기화" 기능 바이브코딩',
     statement: [
       '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
@@ -84,6 +85,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
   },
   {
     id: 'sample-counter-decrement',
+    kind: 'workspace',
     title: '카운터에 "감소" 버튼 바이브코딩',
     statement: [
       '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
@@ -136,6 +138,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
   },
   {
     id: 'sample-counter-parity',
+    kind: 'workspace',
     title: '카운터에 짝/홀 표시 바이브코딩',
     statement: [
       '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
@@ -188,6 +191,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
   },
   {
     id: 'sample-express-todo-api',
+    kind: 'workspace',
     title: 'Todo API에 "할 일 추가" 엔드포인트 바이브코딩',
     statement: [
       '주어진 Express Todo API에는 목록 조회(`GET /todos`)만 구현돼 있습니다.',
@@ -249,6 +253,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
   },
   {
     id: 'sample-fullstack-todo',
+    kind: 'workspace',
     title: '풀스택 Todo — 프론트 폼 + 백엔드 POST 바이브코딩',
     statement: [
       '한 컨테이너에서 프론트(Vite+React)와 백(Express)이 함께 돕니다. 프론트의 "추가" 폼은',

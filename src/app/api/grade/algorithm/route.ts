@@ -62,7 +62,7 @@ export async function POST(req: Request): Promise<Response> {
       languageId: body.languageId,
       sourceCode: body.sourceCode,
       testCases: body.testCases,
-      model: body.model ?? '',
+      model: body.model?.trim() || '',
       systemPrompt: body.systemPrompt,
     });
 

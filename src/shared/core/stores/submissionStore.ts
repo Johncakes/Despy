@@ -10,13 +10,18 @@
  *    **이 브라우저에서 이뤄진 제출들**이며, 학생 식별은 제출 시 입력한 이름/별명에 의존한다
  *    (변조 불가능한 보안 수준 아님 — CLAUDE.md 「아키텍처 방향」 참조).
  *
- * persist key: 'despy-submissions' (version 1)
+ * persist key: 'despy-submissions' (version 2)
+ *
+ * ML 챌린지 제출의 성능 점수(객관)·합격 여부는 result.ml(MlGradingResult)에 담긴다 —
+ * StoredSubmission에 별도 필드를 두지 않는다(선택 필드라 구버전 제출과 호환, 마이그레이션
+ * 불필요). finalScore(0~100, 가중합)와 ml.value(원시 지표)는 척도가 다르므로 분리 유지한다.
  *
  * 사용처: features/solve(제출 기록), features/author(대시보드 조회)
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ChallengeGradingResult, ProjectFiles } from '@/shared/core/types';
+import type { IntegrityLog } from '@/shared/lib/hooks/useProctoringMonitor';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +52,8 @@ export interface StoredSubmission {
   prompts?: SubmissionPromptTurn[];
   /** 제출 시점 AI 사용량(질문 횟수·누적 토큰) — "AI를 얼마나 부렸는지" 지표. 구버전엔 없을 수 있어 선택. */
   aiUsage?: { questionsUsed: number; tokensUsed: number };
+  /** 시험 감독 로그 — 탭 이탈·외부 붙여넣기·전체화면 이탈 카운트. 구버전엔 없을 수 있어 선택. */
+  integrityLog?: IntegrityLog;
 }
 
 interface SubmissionStoreState {
@@ -87,7 +94,12 @@ export const useSubmissionStore = create<SubmissionStoreState>()(
     }),
     {
       name: 'despy-submissions',
-      version: 1,
+      version: 2,
+      migrate: (state, version) => {
+        // v1 → v2: integrityLog 필드 추가(optional이라 기존 제출은 그대로 사용 가능).
+        if (version < 2) return state;
+        return state;
+      },
     },
   ),
 );

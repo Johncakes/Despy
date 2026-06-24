@@ -358,6 +358,7 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                 <HeadCell $col="test">테스트</HeadCell>
                 <HeadCell $col="questions">질문</HeadCell>
                 <HeadCell $col="tokens">토큰</HeadCell>
+                <HeadCell $col="integrity" title="이상행위 감지(탭이탈+붙여넣기+전체화면이탈)">⚠</HeadCell>
                 <HeadCell $col="score">점수</HeadCell>
                 <HeadCell $col="chevron" aria-hidden />
               </TableHeadRow>
@@ -390,6 +391,28 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                       {submission.aiUsage
                         ? submission.aiUsage.tokensUsed.toLocaleString()
                         : '—'}
+                    </BodyCell>
+                    <BodyCell $col="integrity">
+                      {submission.integrityLog ? (
+                        (() => {
+                          const total =
+                            submission.integrityLog.tabSwitchCount +
+                            submission.integrityLog.externalPasteCount +
+                            submission.integrityLog.fullscreenExitCount;
+                          return total > 0 ? (
+                            <IntegrityFlag
+                              $level={total >= 5 ? 'high' : total >= 2 ? 'mid' : 'low'}
+                              title={`탭이탈 ${submission.integrityLog.tabSwitchCount}회 · 붙여넣기 ${submission.integrityLog.externalPasteCount}회 · 전체화면이탈 ${submission.integrityLog.fullscreenExitCount}회`}
+                            >
+                              {total}
+                            </IntegrityFlag>
+                          ) : (
+                            <span style={{ color: 'inherit' }}>—</span>
+                          );
+                        })()
+                      ) : (
+                        '—'
+                      )}
                     </BodyCell>
                     <BodyCell $col="score">
                       <ScoreBadge $score={Math.round(submission.result.finalScore)}>
@@ -486,6 +509,16 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                   {selectedSubmission.aiUsage.tokensUsed.toLocaleString()}
                 </HeaderMetaItem>
               )}
+              {selectedSubmission.integrityLog && (() => {
+                const { tabSwitchCount, externalPasteCount, fullscreenExitCount, tabSwitchTotalMs } =
+                  selectedSubmission.integrityLog;
+                const total = tabSwitchCount + externalPasteCount + fullscreenExitCount;
+                return total > 0 ? (
+                  <HeaderMetaItem title={`탭이탈 ${tabSwitchCount}회(${Math.round(tabSwitchTotalMs / 1000)}초) · 붙여넣기 ${externalPasteCount}회 · 전체화면이탈 ${fullscreenExitCount}회`}>
+                    ⚠ 이상행위 {total}건
+                  </HeaderMetaItem>
+                ) : null;
+              })()}
             </HeaderMeta>
           )
         }
@@ -916,7 +949,7 @@ const PlaceholderBody = styled.p`
 
 // 컬럼 폭 정의 — 헤더/본문 셀이 같은 그리드를 공유해 정렬을 맞춘다.
 const TABLE_COLUMNS =
-  'minmax(120px, 1.6fr) 116px 88px 64px 88px 88px 24px';
+  'minmax(120px, 1.6fr) 116px 88px 64px 88px 72px 88px 24px';
 
 const SubmissionTable = styled.div`
   flex: 1;
@@ -943,11 +976,11 @@ const TableBody = styled.div`
   overflow-y: auto;
 `;
 
-type CellCol = 'name' | 'time' | 'test' | 'questions' | 'tokens' | 'score' | 'chevron';
+type CellCol = 'name' | 'time' | 'test' | 'questions' | 'tokens' | 'integrity' | 'score' | 'chevron';
 
-/** 점수·질문·토큰 등 수치 컬럼은 우측 정렬, 이름은 좌측 정렬. */
+/** 점수·질문·토큰 등 수치 컬럼은 우측 정렬, 이름은 좌측 정렬, 이상행위는 중앙 정렬. */
 const cellAlign = (col: CellCol): string =>
-  col === 'name' ? 'flex-start' : col === 'chevron' ? 'center' : 'flex-end';
+  col === 'name' ? 'flex-start' : col === 'chevron' || col === 'integrity' ? 'center' : 'flex-end';
 
 const HeadCell = styled.div<{ $col: CellCol }>`
   display: flex;
@@ -1475,4 +1508,17 @@ const Empty = styled.p`
   margin: 0;
   font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// 이상행위 횟수 배지 — 횟수에 따라 색상 구분(low/mid/high).
+const IntegrityFlag = styled.span<{ $level: 'low' | 'mid' | 'high' }>`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme, $level }) =>
+    $level === 'high'
+      ? theme.colors.danger
+      : $level === 'mid'
+        ? theme.colors.warning
+        : theme.colors.textMuted};
+  cursor: default;
 `;

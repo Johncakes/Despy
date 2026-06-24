@@ -15,8 +15,9 @@
  *    challengeId별로 IndexedDB(despy-workspace)에 저장·복원된다 — 새로고침해도
  *    진행이 유지된다(docs/spec-webcontainer.md §9.1).
  *
- * 제출 기록: 채점 성공 시 결과를 입력한 이름/별명과 함께 submissionStore에 저장해
- *    교수 채점 대시보드(GradingDashboardView)의 데이터 소스가 되게 한다.
+ * 제출 기록: 채점 성공 시 결과를 로그인 사용자 이름과 함께 submissionStore에 저장해
+ *    교수 채점 대시보드(GradingDashboardView)의 데이터 소스가 되게 한다(제출자 신원은
+ *    입력칸이 아니라 인증 세션에서 — 위장 방지).
  *
  * 사용처: app/workspace/[challengeId]/page.tsx
  */
@@ -24,18 +25,20 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import styled, { css } from 'styled-components';
+import styled, { css, keyframes } from 'styled-components';
 import type {
   ChallengeGradingResult,
   ChallengeProblem,
   ProjectFiles,
 } from '@/shared/core/types';
 import { Button } from '@/shared/components/ui/Button';
+import { useCurrentUser } from '@/shared/core/queries/authQueries';
 import { useGradeChallenge } from '@/shared/core/queries/gradeQueries';
 import {
   useSubmissionStore,
   type SubmissionPromptTurn,
 } from '@/shared/core/stores/submissionStore';
+import { useProctoringMonitor } from '@/shared/lib/hooks/useProctoringMonitor';
 import { applyFileEdit, type FileEdit } from '@/shared/lib/utils/markdownCode';
 import { useWorkspace } from '@/features/solve/useWorkspace';
 import {
@@ -80,7 +83,12 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   const { writeFile, activePath, files, testResult, runTests } = workspace;
   // AI 사용량은 워크스페이스(영속, P4)에서 읽는다 — 새로고침해도 유지된다.
   const { questionsUsed, tokensUsed, recordAiTurn } = workspace;
+  // 제출자 신원은 로그인 세션에서 가져온다 — 학생이 직접 타이핑하지 않는다(위장 방지).
+  const { data: currentUser } = useCurrentUser();
   const grade = useGradeChallenge();
+  const { log: integrityLog, isFullscreen, requestFullscreen, getLog } = useProctoringMonitor();
+  const totalAnomalies =
+    integrityLog.tabSwitchCount + integrityLog.externalPasteCount + integrityLog.fullscreenExitCount;
 
   // 패널 토글 상태(UI 전용 — 영속 대상 아님)
   const [isAiOpen, setIsAiOpen] = useState(true);
@@ -90,8 +98,9 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
   // 제출/채점(P3) 상태 — 결과 모달과 제출 에러.
   const [gradingResult, setGradingResult] = useState<ChallengeGradingResult | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // 제출자 이름/별명 — 채점 대시보드에서 제출을 구분하는 식별자(인증 없음, 입력 의존).
-  const [studentName, setStudentName] = useState('');
+  // 채점 진행 표시용 경과 시간(초) — 단발 LLM 호출이라 실제 %는 없고, 경과 시간으로
+  // "동작 중"임을 정직하게 알린다(아래 progress 오버레이).
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   // ── 이탈 방지 (WebContainer 재설치 방지) ─────────────────────────────────
   // WebContainer가 준비된(또는 준비 중인) 상태에서 페이지를 새로고침하거나 탭을
@@ -211,6 +220,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
 
   const handleSubmit = useCallback(async () => {
     setSubmitError(null);
+    setElapsedSeconds(0); // 진행 오버레이 경과 시간 초기화(처리 시작 시점).
     try {
       // autoTest는 채점의 필수 신호다 — 아직 안 돌렸으면 제출 전에 한 번 실행한다(§7.2).
       // runTests가 실패하면(타임아웃 등) throw되어 아래 catch에서 제출을 중단한다.
@@ -231,21 +241,24 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         model: challenge.aiPolicy.model,
       });
       setGradingResult(result);
-      // 채점 결과를 제출 기록으로 저장 → 교수 대시보드 데이터 소스. 이름은 비우면 '익명'.
+      // 채점 결과를 제출 기록으로 저장 → 교수 대시보드 데이터 소스. 제출자 이름은
+      // 로그인 사용자 이름을 쓴다(비로그인 등 예외 시에만 '익명').
       useSubmissionStore.getState().addSubmission(challenge.id, {
         id: crypto.randomUUID(),
-        studentName: studentName.trim() || '익명',
+        studentName: currentUser?.name.trim() || '익명',
         result,
         // 제출 시점의 코드(변경분)와 AI 대화를 함께 저장 → 대시보드에서 열람.
         submittedFiles,
         prompts: promptsRef.current,
         aiUsage: { questionsUsed, tokensUsed },
+        // 제출 시점 이상행위 로그 — 교수 대시보드 사후 분석용.
+        integrityLog: getLog(),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setSubmitError(message);
     }
-  }, [testResult, runTests, files, challenge, grade, studentName, questionsUsed, tokensUsed]);
+  }, [testResult, runTests, files, challenge, grade, currentUser, questionsUsed, tokensUsed, getLog]);
 
   // 워크스페이스가 준비되어야(테스트 실행 가능) 제출할 수 있다.
   const isSubmitting = grade.isPending;
@@ -257,24 +270,56 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
       ? '테스트 실행 중…'
       : '제출';
 
+  // 제출 처리(테스트 실행 → AI 채점)는 응답까지 수십 초 걸릴 수 있어, 진행 중임을
+  // 정직하게 알리는 오버레이를 띄운다. 단발 LLM 호출이라 실제 진척 %는 없으므로
+  // 현재 단계 라벨 + 경과 시간으로 "멈춘 게 아니라 동작 중"임을 전한다.
+  const isProcessingSubmit = isSubmitting || workspace.isRunningTests;
+  const progressStageLabel = workspace.isRunningTests
+    ? '자동 테스트 실행 중…'
+    : 'AI가 채점하는 중…';
+  // 경과 시간 카운터는 처리 중일 때만 1초마다 갱신한다. 0으로의 리셋은 제출 시작
+  // 시점(handleSubmit)에서 하고, 여기서는 비동기 콜백으로만 setState 한다
+  // (effect 본문에서의 동기 setState 금지 규칙).
+  useEffect(() => {
+    if (!isProcessingSubmit) return;
+    const startedAt = Date.now();
+    const intervalId = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isProcessingSubmit]);
+
   return (
     <Wrapper>
+      {!isFullscreen && (
+        <FullscreenBanner>
+          시험 모드를 위해 전체화면을 권장합니다.
+          <FullscreenButton type="button" onClick={requestFullscreen}>
+            전체화면 시작
+          </FullscreenButton>
+        </FullscreenBanner>
+      )}
       <TopBar>
         <BackButton type="button" onClick={handleBackToList}>← 목록</BackButton>
         <Title>{challenge.title}</Title>
+        {totalAnomalies > 0 && (
+          <AnomalyBadge
+            title={`탭 이탈 ${integrityLog.tabSwitchCount}회 · 외부 붙여넣기 ${integrityLog.externalPasteCount}회 · 전체화면 이탈 ${integrityLog.fullscreenExitCount}회`}
+          >
+            ⚠ {totalAnomalies}
+          </AnomalyBadge>
+        )}
         {submitError && <ErrorText title={submitError}>{submitError}</ErrorText>}
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
             AI 도우미 열기
           </Button>
         )}
-        <NameInput
-          value={studentName}
-          onChange={(event) => setStudentName(event.target.value)}
-          placeholder="이름/별명"
-          aria-label="제출자 이름/별명"
-          maxLength={40}
-        />
+        {currentUser && (
+          <SubmitterTag title="로그인한 사용자 이름으로 제출됩니다">
+            제출자 <strong>{currentUser.name}</strong>
+          </SubmitterTag>
+        )}
         <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
           {submitLabel}
         </Button>
@@ -349,6 +394,20 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         </WorkspaceColumn>
       </Body>
 
+      {isProcessingSubmit && (
+        <ProgressOverlay role="status" aria-live="polite">
+          <ProgressCard>
+            <Spinner aria-hidden />
+            <ProgressStage>{progressStageLabel}</ProgressStage>
+            <ProgressElapsed>{elapsedSeconds}초 경과</ProgressElapsed>
+            <ProgressHint>
+              AI 정성 채점은 보통 10~30초 정도 걸립니다. 창을 닫지 말고 잠시
+              기다려 주세요.
+            </ProgressHint>
+          </ProgressCard>
+        </ProgressOverlay>
+      )}
+
       {gradingResult && (
         <ChallengeGradingResultPanel
           result={gradingResult}
@@ -402,20 +461,15 @@ const Title = styled.h1`
   font-size: ${({ theme }) => theme.font.sizeLg};
 `;
 
-// 제출자 이름 입력 — 상단 바에서 제출 버튼 옆. 좁게 두어 레이아웃을 차지하지 않는다.
-const NameInput = styled.input`
-  width: 140px;
-  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+// 제출자 표시 — 로그인 사용자 이름으로 제출됨을 알리는 읽기 전용 라벨(제출 버튼 옆).
+const SubmitterTag = styled.span`
   font-size: ${({ theme }) => theme.font.sizeSm};
-  font-family: inherit;
-  color: ${({ theme }) => theme.colors.text};
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.sm};
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
 
-  &:focus {
-    outline: none;
-    border-color: ${({ theme }) => theme.colors.primary};
+  strong {
+    color: ${({ theme }) => theme.colors.text};
+    font-weight: ${({ theme }) => theme.font.weightBold};
   }
 `;
 
@@ -474,4 +528,102 @@ const EditorArea = styled.div`
 const PreviewArea = styled.div`
   flex: 1;
   min-height: 0;
+`;
+
+const FullscreenBanner = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.md}`};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const FullscreenButton = styled.button`
+  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-family: inherit;
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  background: transparent;
+  border: 1px solid ${({ theme }) => theme.colors.primary};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  cursor: pointer;
+`;
+
+const AnomalyBadge = styled.span`
+  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.warning};
+  border: 1px solid ${({ theme }) => theme.colors.warning};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  cursor: default;
+  white-space: nowrap;
+`;
+
+// ── 채점 진행 오버레이 ──────────────────────────────────────────────────────
+// 제출~채점 응답까지 화면 전체를 덮어 "동작 중"임을 명확히 알린다. 단발 LLM
+// 호출이라 결정형 진척 바는 불가능 → 회전 스피너 + 단계 라벨 + 경과 시간(초)으로
+// 정직한 indeterminate 피드백을 준다.
+
+const spin = keyframes`
+  to { transform: rotate(360deg); }
+`;
+
+const ProgressOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 16, 0.66);
+`;
+
+const ProgressCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: ${({ theme }) => theme.spacing.lg};
+  text-align: center;
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
+`;
+
+const Spinner = styled.div`
+  width: 32px;
+  height: 32px;
+  border: 3px solid ${({ theme }) => theme.colors.border};
+  border-top-color: ${({ theme }) => theme.colors.primary};
+  border-radius: 50%;
+  animation: ${spin} 0.8s linear infinite;
+`;
+
+const ProgressStage = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeMd};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const ProgressElapsed = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  font-variant-numeric: tabular-nums;
+`;
+
+const ProgressHint = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  line-height: 1.5;
+  color: ${({ theme }) => theme.colors.textMuted};
 `;

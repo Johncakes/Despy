@@ -22,6 +22,12 @@
  * (useWorkspace가 startDevServer(previewPort)에 전달). 채점은 한 번의 npm test로 프론트
  * (happy-dom)와 백(node 도크블록 + supertest) 두 계층을 함께 검증한다.
  *
+ * 마지막으로 **ML 챌린지 템플릿**(ML_CLASSIFICATION_TEMPLATE·ML_REGRESSION_TEMPLATE)은 dev
+ * 서버 없이 pure @tensorflow/tfjs로 모델을 학습/평가한다(WebContainer는 네이티브 바인딩
+ * 미지원 → tfjs-node 불가, 순수 JS tfjs만 가능). 학생은 model.mjs(구조·하이퍼파라미터)를
+ * 고치고, 잠긴 eval.mjs가 고정 seed로 새로 학습한 뒤 숨겨진 test셋(ML_*_TEST_FILES — 채점
+ * 시점에만 주입)으로 점수를 재 __DESPY_SCORE__ 센티넬로 출력한다(runtime.runScoreEval이 파싱).
+ *
  * 사용처: features/solve/WorkspacePlaygroundView(PoC), sampleChallenges(샘플 과제)
  */
 import type { ProjectFiles } from '@/shared/core/types';
@@ -978,4 +984,680 @@ export const FULLSTACK_TODO_LOCKED_PATHS: readonly string[] = [
   'server/index.js',
   'server/db.js',
   'server/app.test.js',
+];
+
+// ── ML 챌린지(TensorFlow.js) 템플릿 ──────────────────────────────────────────
+
+/**
+ * ML 챌린지 템플릿 — pure @tensorflow/tfjs(네이티브 바인딩 없는 순수 JS)로 브라우저
+ * WebContainer 안에서 모델을 학습/평가한다. dev 서버(미리보기)가 없고 점수 패널이 주 화면이다.
+ *
+ * 파일 구성(분류·회귀 공통 골격):
+ *   - data.mjs(잠금): CSV 로더(+회귀는 표준화기). train/test에 동일 적용해 전처리 일관.
+ *   - model.mjs(편집): 학생이 모델 구조·하이퍼파라미터를 작성하는 주 작업 영역.
+ *   - train.mjs(편집): train.csv로 빠르게 학습해 train 성능을 확인하는 실험 스크립트.
+ *   - eval.mjs(잠금): 고정 seed로 새로 학습 → 숨겨진 test셋 점수를 __DESPY_SCORE__ 센티넬로 출력.
+ *   - data/train.csv(잠금): 학생 노출 train셋(채점 train을 고정해 공정성 유지).
+ *   - package.json(잠금): @tensorflow/tfjs 의존성 + train/eval 스크립트.
+ *
+ * 숨긴 test셋은 ML_*_TEST_FILES(data/test.csv)로 분리해 ChallengeProblem.testFiles에 담고,
+ * 채점(평가) 시점에만 컨테이너에 mount한다(학생 파일트리에 노출 안 됨). 데이터는 시드 고정
+ * 합성 데이터다(분류: Iris식 3클래스 4피처, 회귀: 주택가격식 3피처). 점수 변동·데이터 누수
+ * 한계는 UI에 명시한다(docs/spec-ml-challenge.md §7).
+ */
+export const ML_CLASSIFICATION_TEMPLATE: ProjectFiles = {
+  'package.json': JSON.stringify(
+    {
+      name: 'despy-ml-classification',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        train: 'node train.mjs',
+        eval: 'node eval.mjs',
+      },
+      dependencies: {
+        '@tensorflow/tfjs': '^4.22.0',
+      },
+    },
+    null,
+    2,
+  ),
+
+  'README.md': `# 분류 챌린지 (Iris식)
+
+꽃잎/꽃받침 4개 수치로 품종(0·1·2)을 맞히는 **분류** 문제입니다.
+
+## 작업
+- \`model.mjs\`의 모델 구조·하이퍼파라미터를 고쳐 정확도를 끌어올리세요.
+- \`node train.mjs\`로 train 정확도를 확인하며 반복합니다(AI에게 도움을 요청하세요).
+
+## 채점
+- '성능 점수' 탭의 **평가 실행**(또는 제출)이 숨겨진 test셋으로 **정확도**를 잽니다.
+- \`data.mjs\`·\`eval.mjs\`·\`data/train.csv\`·\`package.json\`은 잠겨 있습니다(채점 공정성).
+`,
+
+  // CSV 로더(잠금) — train/test에 동일하게 쓰여 전처리를 일관되게 유지한다.
+  'data.mjs': `import { readFileSync } from 'node:fs';
+
+// CSV 로더(잠금) — 헤더 1줄 + 마지막 컬럼을 라벨(클래스 인덱스)로, 나머지를 피처로 읽는다.
+// 같은 형식의 train/test에 똑같이 쓰여 전처리가 일관되게 유지된다.
+export function loadCsv(path) {
+  const text = readFileSync(path, 'utf8').trim();
+  const [headerLine, ...lines] = text.split('\\n');
+  const header = headerLine.split(',');
+  const rows = lines.filter(Boolean).map((line) => line.split(',').map(Number));
+  const features = rows.map((r) => r.slice(0, -1));
+  const labels = rows.map((r) => r[r.length - 1]);
+  return { header, features, labels };
+}
+`,
+
+  // ✏️ 학생 작업 영역 — 모델 구조·하이퍼파라미터.
+  'model.mjs': `import * as tf from '@tensorflow/tfjs';
+
+// ✏️ 학생 작업 영역 — 분류 모델 구조와 하이퍼파라미터를 자유롭게 바꾸세요.
+// eval(채점)은 이 buildModel을 고정 seed로 호출해 새로 학습한 뒤 숨겨진 test셋으로
+// 정확도를 잰다. 따라서 "외운 정답"이 아니라 모델 설계 자체가 점수를 만든다.
+
+// inputDim: 피처 개수, numClasses: 클래스 개수, seed: 가중치 초기화 고정용 시드.
+export function buildModel(inputDim, numClasses, seed) {
+  const model = tf.sequential();
+  model.add(
+    tf.layers.dense({
+      units: 16,
+      activation: 'relu',
+      inputShape: [inputDim],
+      kernelInitializer: tf.initializers.glorotUniform({ seed }),
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: numClasses,
+      activation: 'softmax',
+      kernelInitializer: tf.initializers.glorotUniform({ seed: seed + 1 }),
+    }),
+  );
+  model.compile({
+    optimizer: tf.train.adam(0.05),
+    loss: 'categoricalCrossentropy',
+    metrics: ['accuracy'],
+  });
+  return model;
+}
+
+// 학습 하이퍼파라미터 — epochs/batchSize를 조정해 성능을 끌어올리세요.
+export const TRAIN_CONFIG = { epochs: 80, batchSize: 16 };
+`,
+
+  // ✏️ 학생 실험용 — train.csv로 학습해 train 성능을 빠르게 확인한다.
+  'train.mjs': `import * as tf from '@tensorflow/tfjs';
+import { loadCsv } from './data.mjs';
+import { buildModel, TRAIN_CONFIG } from './model.mjs';
+
+// 학생 실험용 — train.csv로 학습하고 train 정확도를 출력한다. AI와 함께 model.mjs를
+// 고쳐 가며 'node train.mjs'로 빠르게 반복하세요. 실제 채점은 숨겨진 test셋으로 합니다.
+
+const SEED = Number(process.env.DESPY_SEED || 42);
+const { features, labels } = loadCsv('data/train.csv');
+const numClasses = new Set(labels).size;
+
+const xs = tf.tensor2d(features);
+const ys = tf.oneHot(tf.tensor1d(labels, 'int32'), numClasses);
+
+const model = buildModel(features[0].length, numClasses, SEED);
+console.log('학습 시작 — 피처 ' + features[0].length + '개, 클래스 ' + numClasses + '개, 표본 ' + labels.length + '개');
+await model.fit(xs, ys, { ...TRAIN_CONFIG, shuffle: false, verbose: 0 });
+
+const predIdx = model.predict(xs).argMax(1);
+const acc = (await predIdx.equal(tf.tensor1d(labels, 'int32')).mean().data())[0];
+console.log('train 정확도: ' + (acc * 100).toFixed(1) + '%');
+console.log('제출하면 숨겨진 test셋으로 채점됩니다.');
+`,
+
+  // 채점 하네스(잠금) — 고정 seed로 새로 학습 후 숨겨진 test셋 점수를 센티넬로 출력한다.
+  'eval.mjs': `import * as tf from '@tensorflow/tfjs';
+import { loadCsv } from './data.mjs';
+import { buildModel, TRAIN_CONFIG } from './model.mjs';
+
+// 채점 하네스(잠금) — 학생 model.mjs를 고정 seed로 새로 학습한 뒤, 숨겨진 test셋
+// (data/test.csv, 채점 시점에만 주입)으로 정확도를 재고 점수 센티넬을 출력한다.
+// shuffle:false + 고정 seed로 동일 코드의 점수 변동을 줄인다(완벽한 결정성은 아님).
+
+const SEED = Number(process.env.DESPY_SEED || 42);
+
+const train = loadCsv('data/train.csv');
+const test = loadCsv('data/test.csv');
+const numClasses = new Set(train.labels).size;
+
+const xs = tf.tensor2d(train.features);
+const ys = tf.oneHot(tf.tensor1d(train.labels, 'int32'), numClasses);
+
+const model = buildModel(train.features[0].length, numClasses, SEED);
+await model.fit(xs, ys, { ...TRAIN_CONFIG, shuffle: false, verbose: 0 });
+
+const testX = tf.tensor2d(test.features);
+const predIdx = Array.from(await model.predict(testX).argMax(1).data());
+let correct = 0;
+test.labels.forEach((label, i) => {
+  if (predIdx[i] === label) correct++;
+});
+const accuracy = correct / test.labels.length;
+
+process.stdout.write(
+  '__DESPY_SCORE__' +
+    JSON.stringify({ metric: 'accuracy', value: accuracy }) +
+    '__DESPY_SCORE_END__\\n',
+);
+`,
+
+  // 학생 노출 train 데이터(잠금 — 채점 train셋을 고정해 공정성 유지).
+  'data/train.csv': `sepal_len,sepal_wid,petal_len,petal_wid,species
+5.8,2.99,4.13,0.71,1
+6.1,2.88,4.43,1.49,1
+4.84,3.77,1.47,0,0
+5.06,3.6,1.36,0.24,0
+5.92,3.1,4.39,1.32,1
+6.73,3.37,6.03,2.66,2
+6.54,2.96,5.59,1.99,2
+6.59,3.01,4.29,1.49,1
+5.7,3.17,4.53,1.35,1
+6.17,2.88,4.46,0.6,1
+5.72,2.62,4.51,1.59,1
+6.86,2.99,5.15,2.55,2
+5.4,2.71,4.11,1.69,1
+6.62,3.05,5.84,1.82,2
+6.89,2.64,5.89,1.61,2
+6.44,2.94,5.47,1.84,2
+6.22,3.14,4.22,1.44,1
+6.26,2.36,4.6,1.41,1
+5.87,2.81,4.58,1.3,1
+5.08,3.17,1.62,0.08,0
+5.51,3.52,1.39,0.36,0
+5.04,3.79,1.18,0.14,0
+6.43,2.68,6,2.2,2
+6.51,2.96,5.83,1.56,2
+5.18,3.91,1.85,0.2,0
+4.94,2.98,1.46,0.21,0
+6.33,2.82,4.64,0.98,1
+5.31,3.27,2.14,0.01,0
+4.67,3.76,1.31,0.38,0
+6.48,3.2,5.34,1.79,2
+6.75,2.8,5.97,1.87,2
+5.18,3.91,1.74,1.03,0
+6.97,2.72,6.15,1.99,2
+5.03,3.3,1.38,0.36,0
+5.11,3.66,1.65,0.4,0
+6.46,2.79,5.87,2.36,2
+5.76,3.14,4.15,1.49,1
+4.7,3.46,1.58,0.08,0
+5.24,2.86,4.38,1.36,1
+5.99,3.35,5.7,2.39,2
+4.88,3.22,1.84,-0.04,0
+6.48,2.91,6.03,1.9,2
+4.8,3.5,1.65,0.07,0
+5.19,3.91,1.38,0.57,0
+5.7,2.63,4.22,1.58,1
+6.7,3.72,5.91,1.86,2
+6.75,3.2,5.78,1.87,2
+6.91,2.97,5.53,2.04,2
+6.41,2.65,5.63,2.2,2
+5.74,3.26,2,-0.08,0
+6.45,3.02,5.78,1.98,2
+5.5,3.79,1.2,-0.25,0
+6.38,3.19,6.13,2.1,2
+5.01,3.54,1.4,-0.09,0
+6.29,2.93,4.25,1.42,1
+5.71,2.54,4.47,1.29,1
+4.95,3.26,1.48,0.21,0
+6.01,2.68,4.5,1.17,1
+5.02,3.24,1.15,-0.34,0
+5.68,2.54,4.38,0.69,1
+6.07,2.35,4.85,1.58,1
+6.91,2.88,5.82,2,2
+6.07,2.84,4.09,1.4,1
+6.32,2.68,3.98,0.83,1
+5.2,3.51,1.47,0.26,0
+6.46,3.14,6.03,2.33,2
+5.18,3.4,1.19,0.53,0
+6.39,3.07,5.34,1.89,2
+5.79,3.02,4.04,1.76,1
+6.07,3.38,4.24,1.65,1
+5.72,2.92,4.69,1.4,1
+6.28,3.14,5.2,2.17,2
+6.21,3.24,5.79,2.45,2
+6.71,3.3,5.13,2.48,2
+6.77,3.1,5.94,2.08,2
+5.29,3.37,1.66,0.07,0
+6.69,2.9,6.01,2,2
+6.61,2.76,6.02,2.12,2
+6.14,3.27,4.41,1.23,1
+6.75,2.89,5.56,2.05,2
+6.23,2.08,4.11,1.59,1
+5.03,3.53,1.47,0.15,0
+6.2,2.64,5.61,2.15,2
+5.16,3.47,1.5,0.33,0
+6.4,3.37,5.83,2.27,2
+5.86,3.35,4.18,1.1,1
+5.53,3.04,4.18,1.39,1
+5.94,2.95,4.29,1.23,1
+4.74,2.81,1.66,0.15,0
+4.88,3.52,1.24,-0.06,0
+5.93,2.79,4.6,1.33,1
+4.97,3.24,1.42,0.38,0
+5.04,3.19,1.51,0.44,0
+4.96,3.27,1.17,-0.1,0
+4.9,2.88,2.09,0.2,0
+6.43,2.99,5.96,1.91,2
+6.47,2.78,5.57,2.05,2
+5.61,3.57,1.68,0.41,0
+6.58,2.76,5.92,1.78,2
+4.92,4.12,1.99,-0.03,0
+5.72,2.57,4.63,1.92,1
+6.03,3.12,4.1,1.74,1
+6.5,2.95,5.81,2.13,2
+4.84,3.55,1.59,-0.46,0
+6.15,2.69,4.43,1.36,1
+5.75,2.78,4.49,1.82,1
+5.83,2.74,4.36,1.67,1
+6.5,3.29,5.49,2.35,2
+5.19,3.04,1.63,-0.21,0
+4.88,3.58,1.67,0.39,0
+4.9,4.12,1.01,0.44,0
+6.66,2.41,5.89,2.15,2
+5.36,3.24,2.17,-0.06,0
+6.45,3.3,4.64,1.84,1
+6.06,2.43,4.11,1.34,1
+6.78,3.58,5.44,1.94,2
+5.27,3.6,1.61,0.53,0
+6.62,2.91,5.76,1.62,2
+5.7,3,4.56,1.97,1
+6.28,2.47,4.33,1.38,1
+`,
+};
+
+export const ML_CLASSIFICATION_TEST_FILES: ProjectFiles = {
+  // 숨긴 test 데이터 — 학생 파일트리에 노출되지 않고 채점(평가) 시점에만 컨테이너에 주입된다.
+  'data/test.csv': `sepal_len,sepal_wid,petal_len,petal_wid,species
+4.54,3.25,1.46,0.13,0
+4.6,2.95,1.78,-0.38,0
+5.92,3.2,4.52,1.37,1
+6.62,3.53,6.09,2.14,2
+7.23,3.23,5.58,1.73,2
+5.6,3.9,1.68,0.28,0
+6.13,3.04,5.82,2.16,2
+5.77,2.86,4.49,1.16,1
+6.92,3.06,5.71,1.8,2
+5.93,2.98,4.27,1.62,1
+5.21,3.47,1.61,0.23,0
+5.02,3.59,1.55,0.55,0
+6.91,3.05,5.58,1.69,2
+5.58,3.64,1.93,0.08,0
+6.86,3.17,5.62,2.12,2
+6.73,2.42,5.46,2.35,2
+6.09,2.37,4.66,1.22,1
+6.14,2.8,4.15,1.25,1
+5.8,3,4.45,1.39,1
+6.46,2.07,4.61,1.28,1
+6.62,3.03,4.43,1.5,1
+6.9,2.74,5.59,1.87,2
+5.1,3.74,1.44,0.56,0
+6.44,2.84,6.24,2.37,2
+5.12,3.7,1.33,0.58,0
+4.83,3.1,1.55,0.06,0
+4.99,3.22,1.55,0.03,0
+5.03,3.14,1.57,-0.02,0
+6.18,2.72,4.02,1.44,1
+6.55,3.04,5.94,2.01,2
+6.24,2.63,4.22,1.5,1
+6.07,3.24,4.66,1.5,1
+6.05,2.11,4.41,1.08,1
+4.99,3.38,1.99,0.34,0
+6.77,2.66,5.55,1.92,2
+6.27,3.17,5.83,2.15,2
+`,
+};
+
+export const ML_REGRESSION_TEMPLATE: ProjectFiles = {
+  'package.json': JSON.stringify(
+    {
+      name: 'despy-ml-regression',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        train: 'node train.mjs',
+        eval: 'node eval.mjs',
+      },
+      dependencies: {
+        '@tensorflow/tfjs': '^4.22.0',
+      },
+    },
+    null,
+    2,
+  ),
+
+  'README.md': `# 회귀 챌린지 (주택 가격식)
+
+면적/방수/연식 3개 수치로 연속값(가격)을 예측하는 **회귀** 문제입니다.
+
+## 작업
+- \`model.mjs\`의 모델 구조·하이퍼파라미터를 고쳐 RMSE(낮을수록 좋음)를 줄이세요.
+- \`node train.mjs\`로 train RMSE를 확인하며 반복합니다(AI에게 도움을 요청하세요).
+- 피처 표준화는 \`data.mjs\`(잠금)가 처리합니다.
+
+## 채점
+- '성능 점수' 탭의 **평가 실행**(또는 제출)이 숨겨진 test셋으로 **RMSE**를 잽니다.
+- \`data.mjs\`·\`eval.mjs\`·\`data/train.csv\`·\`package.json\`은 잠겨 있습니다(채점 공정성).
+`,
+
+  // CSV 로더(잠금) — train/test에 동일하게 쓰여 전처리를 일관되게 유지한다.
+  'data.mjs': `import { readFileSync } from 'node:fs';
+
+// CSV 로더(잠금) — 헤더 1줄 + 마지막 컬럼을 타깃(연속값)으로, 나머지를 피처로 읽는다.
+export function loadCsv(path) {
+  const text = readFileSync(path, 'utf8').trim();
+  const [headerLine, ...lines] = text.split('\\n');
+  const header = headerLine.split(',');
+  const rows = lines.filter(Boolean).map((line) => line.split(',').map(Number));
+  const features = rows.map((r) => r.slice(0, -1));
+  const targets = rows.map((r) => r[r.length - 1]);
+  return { header, features, targets };
+}
+
+// 표준화기(잠금) — train 피처의 평균/표준편차로 (x-μ)/σ 정규화 함수를 만든다.
+// 피처 스케일 차이가 커 학습이 불안정해지는 것을 막는다. train으로 만든 같은 함수를
+// train·test에 동일 적용해야 전처리가 일관된다(eval/train이 함께 사용).
+export function makeStandardizer(features) {
+  const nFeat = features[0].length;
+  const means = [];
+  const sds = [];
+  for (let c = 0; c < nFeat; c++) {
+    const vals = features.map((r) => r[c]);
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+    means.push(mean);
+    sds.push(Math.sqrt(variance) || 1);
+  }
+  return (rows) => rows.map((r) => r.map((v, c) => (v - means[c]) / sds[c]));
+}
+`,
+
+  // ✏️ 학생 작업 영역 — 모델 구조·하이퍼파라미터.
+  'model.mjs': `import * as tf from '@tensorflow/tfjs';
+
+// ✏️ 학생 작업 영역 — 회귀 모델 구조와 하이퍼파라미터를 자유롭게 바꾸세요.
+// eval(채점)은 표준화된 피처로 이 모델을 고정 seed로 새로 학습한 뒤, 숨겨진 test셋의
+// RMSE(낮을수록 좋음)를 잰다. 출력은 연속값 1개이므로 마지막 층은 활성함수 없이 둡니다.
+
+// inputDim: 피처 개수, seed: 가중치 초기화 고정용 시드.
+export function buildModel(inputDim, seed) {
+  const model = tf.sequential();
+  model.add(
+    tf.layers.dense({
+      units: 16,
+      activation: 'relu',
+      inputShape: [inputDim],
+      kernelInitializer: tf.initializers.glorotUniform({ seed }),
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 1,
+      kernelInitializer: tf.initializers.glorotUniform({ seed: seed + 1 }),
+    }),
+  );
+  model.compile({ optimizer: tf.train.adam(0.05), loss: 'meanSquaredError' });
+  return model;
+}
+
+// 학습 하이퍼파라미터 — epochs/batchSize를 조정해 RMSE를 낮추세요.
+export const TRAIN_CONFIG = { epochs: 150, batchSize: 16 };
+`,
+
+  // ✏️ 학생 실험용 — train.csv로 학습해 train 성능을 빠르게 확인한다.
+  'train.mjs': `import * as tf from '@tensorflow/tfjs';
+import { loadCsv, makeStandardizer } from './data.mjs';
+import { buildModel, TRAIN_CONFIG } from './model.mjs';
+
+// 학생 실험용 — train.csv로 학습하고 train RMSE를 출력한다. AI와 함께 model.mjs를
+// 고쳐 가며 'node train.mjs'로 반복하세요. 실제 채점은 숨겨진 test셋으로 합니다.
+
+const SEED = Number(process.env.DESPY_SEED || 42);
+const { features, targets } = loadCsv('data/train.csv');
+const standardize = makeStandardizer(features);
+
+const xs = tf.tensor2d(standardize(features));
+const ys = tf.tensor2d(targets.map((t) => [t]));
+
+const model = buildModel(features[0].length, SEED);
+console.log('학습 시작 — 피처 ' + features[0].length + '개, 표본 ' + targets.length + '개');
+await model.fit(xs, ys, { ...TRAIN_CONFIG, shuffle: false, verbose: 0 });
+
+const preds = Array.from(await model.predict(xs).data());
+let se = 0;
+targets.forEach((t, i) => {
+  se += (preds[i] - t) ** 2;
+});
+console.log('train RMSE: ' + Math.sqrt(se / targets.length).toFixed(3));
+console.log('제출하면 숨겨진 test셋으로 채점됩니다.');
+`,
+
+  // 채점 하네스(잠금) — 고정 seed로 새로 학습 후 숨겨진 test셋 점수를 센티넬로 출력한다.
+  'eval.mjs': `import * as tf from '@tensorflow/tfjs';
+import { loadCsv, makeStandardizer } from './data.mjs';
+import { buildModel, TRAIN_CONFIG } from './model.mjs';
+
+// 채점 하네스(잠금) — 학생 model.mjs를 고정 seed로 새로 학습한 뒤, 숨겨진 test셋
+// (data/test.csv, 채점 시점에만 주입)의 RMSE를 재고 점수 센티넬을 출력한다.
+// 표준화기는 train으로 만들어 train·test에 동일 적용한다(전처리 일관성).
+
+const SEED = Number(process.env.DESPY_SEED || 42);
+
+const train = loadCsv('data/train.csv');
+const test = loadCsv('data/test.csv');
+const standardize = makeStandardizer(train.features);
+
+const xs = tf.tensor2d(standardize(train.features));
+const ys = tf.tensor2d(train.targets.map((t) => [t]));
+
+const model = buildModel(train.features[0].length, SEED);
+await model.fit(xs, ys, { ...TRAIN_CONFIG, shuffle: false, verbose: 0 });
+
+const testX = tf.tensor2d(standardize(test.features));
+const preds = Array.from(await model.predict(testX).data());
+let se = 0;
+test.targets.forEach((t, i) => {
+  se += (preds[i] - t) ** 2;
+});
+const rmse = Math.sqrt(se / test.targets.length);
+
+process.stdout.write(
+  '__DESPY_SCORE__' +
+    JSON.stringify({ metric: 'rmse', value: rmse }) +
+    '__DESPY_SCORE_END__\\n',
+);
+`,
+
+  // 학생 노출 train 데이터(잠금 — 채점 train셋을 고정해 공정성 유지).
+  'data/train.csv': `area,rooms,age,price
+2.56,4.56,35.55,57.15
+6.92,4.26,22.04,145.09
+3.72,1.04,9.66,68.76
+7.42,3.48,46.85,114.95
+3.09,2.25,26.95,50.08
+6.19,4,25.24,120.45
+4.96,4.52,41.78,96
+2.12,3.32,25.56,45.08
+3.13,4.85,18.86,95.22
+4.18,4.88,42.36,78.12
+2.93,4.51,8.62,101.91
+3.31,1.58,26.77,50.04
+3.31,1.81,35.95,36.67
+5.72,2.16,40.95,79.28
+2.79,4.95,8.94,98.29
+3.15,4.69,39.96,62.69
+7.47,4.27,15.23,165.24
+4.75,1.94,15.75,87.24
+5.7,1.2,17.22,90.53
+5.04,4.39,12.19,127.15
+4.39,1.32,42.53,38.9
+4.96,2.78,43.42,75.41
+6.52,4.52,9,161.67
+4.46,1.16,47.15,41.81
+3.96,3.02,35.8,69.9
+7.46,4.97,33.96,151.21
+5.4,1.06,48.29,55.14
+5.77,1.82,8.76,111.84
+2.2,2.51,46.2,18.32
+5.73,4.02,8.29,141.42
+2.31,2.18,16.34,47.06
+2.26,4.76,31.99,63.37
+5.7,3.11,8.44,131.34
+7.73,4.76,23.43,166.22
+4.06,2.09,29.18,59.47
+3.1,2.26,11.94,70.21
+3.37,4.63,42.17,63.44
+3.63,3.14,37.82,55.49
+4.75,3.39,36.65,74.31
+2.94,4.23,21.44,80.49
+4.99,1.95,25.41,80.33
+5.51,3.23,39.7,86.74
+7.41,2.8,48.35,109.35
+5.73,1.68,11.43,112.65
+7.59,2.81,45.74,109.79
+7.85,3.77,33.04,140.6
+5.09,4.83,31.6,115.38
+7.08,1.31,48.11,91.96
+6.35,3.39,33.67,110.99
+5.04,4.76,23.33,124.37
+3.61,3.73,38.51,64.24
+6.3,2.32,49.42,78.49
+5.26,1.98,10.71,104.53
+7.27,2.1,37.98,109.62
+2.53,2.11,44.47,16.16
+2.32,1.09,28.89,15.34
+3.45,3.25,16.96,80.45
+6.77,4.08,42.4,116.29
+6.77,2.97,27.17,126.07
+6.57,2.56,16.09,135.93
+4.16,3.63,44.13,68.19
+3.31,2.81,17.74,74.52
+2.1,2.22,21.48,42.38
+6.63,2.11,40.67,101.37
+7,4.26,36.4,131.18
+2.1,1.41,5.53,51.34
+2.51,4.79,10.05,97.07
+6.97,3.66,10.68,162.28
+2.44,4.26,48.13,34.24
+6.74,2.35,22.43,119.8
+7.4,4.5,40.82,137.37
+5.15,2.99,8.23,114.31
+5.35,4.07,48.24,90.68
+5.28,2.19,22.39,92.82
+2.26,3.26,44.31,26.6
+2.16,1.86,37.97,14.73
+5.46,1.61,42.93,70.05
+4.19,3.89,45.43,64.78
+3.35,4.89,7.99,113.6
+7.95,4.36,20.21,172.58
+3.09,3.32,46.76,39.51
+2.04,4.86,25.21,65.09
+6.42,3.88,40.34,118.25
+3.57,1.2,48.69,24.3
+5.79,1.55,11.2,114.81
+5.18,2.81,40.01,76.33
+3.79,4.82,44.16,76.18
+7.91,4.87,32.19,160.24
+5.24,3.04,13.73,114.28
+7.69,3.56,10.57,172.54
+4.28,2.75,49.99,52.04
+4.16,1.26,45,34.55
+6.92,4.55,12.84,161.59
+2.84,2.75,16.14,63.17
+4.62,3.68,12.96,107.33
+5.47,1.18,36.43,69.9
+3.85,2.01,30.05,58.54
+2.7,1.24,44.78,3.09
+5.08,3.31,31.96,90.38
+2.29,3.98,37.4,45
+2.31,3.48,33.94,44.96
+4.9,2.32,33.07,75.07
+5.15,2.46,42.79,73.83
+5.65,2.28,30.42,91.11
+7.67,1.07,7.22,144.31
+3.06,4.9,44.53,57.63
+7.37,2.43,32.15,128.14
+7.69,3.05,23.15,150.77
+6.92,2.14,10.37,139.79
+7.5,1.44,29.02,122.63
+2.94,2.42,49.24,18.79
+5.41,2.18,10.71,111.55
+7.15,2.66,16.34,141.05
+5.43,3.86,11.6,132.34
+7.47,2.88,31.15,132.43
+6.22,2.57,48.2,84.17
+7.04,4.07,34.01,144.54
+5.92,4.95,11.96,147.76
+7.32,1.68,46.49,98.15
+3.18,1.22,27.16,37.25
+`,
+};
+
+export const ML_REGRESSION_TEST_FILES: ProjectFiles = {
+  // 숨긴 test 데이터 — 학생 파일트리에 노출되지 않고 채점(평가) 시점에만 컨테이너에 주입된다.
+  'data/test.csv': `area,rooms,age,price
+6.47,1.5,40.6,80.17
+7.06,2.47,11.82,129.91
+4.15,2.63,26.4,69.27
+6.15,2.64,33.83,102.95
+4.16,1.44,33.29,54.32
+5.81,1.31,23.08,83.15
+2.61,1.44,37.79,20.2
+6.39,2.07,6.25,131.36
+6.84,3.91,8.83,159.75
+7.36,2.84,16.26,141.36
+2.71,4.55,6.98,95.4
+2.5,2.34,17.3,48.94
+4.01,4.32,25.67,92.85
+7.46,4.66,46,126.59
+2.05,2.57,21.86,36.07
+5.02,4.87,19.5,127.95
+5.61,1.24,36.21,67.5
+3.75,3.04,14.08,82.22
+5.48,2.97,47.79,74.17
+2.39,4.54,11.73,79.56
+3.05,1.7,20.35,49.39
+6.41,3.03,40.99,109.06
+5.21,3.01,41.26,79.56
+4.56,3.39,26.1,93.89
+4.1,1,46.87,27.55
+5.93,1.61,48.32,74.72
+2.3,4.29,22.04,64.41
+3.58,3.1,10.38,90.42
+3.26,1.56,27.33,45.52
+3.59,3.83,7.2,101.19
+5.31,1.09,10.12,90.38
+4.48,1.93,29.63,67.63
+6.66,4.81,26.27,145.91
+2.39,2.79,41.06,34.18
+5.7,4.79,44.07,104.82
+2.12,1.47,17.84,32.7
+`,
+};
+
+export const ML_CLASSIFICATION_LOCKED_PATHS: readonly string[] = [
+  'package.json',
+  'README.md',
+  'data.mjs',
+  'eval.mjs',
+  'data/train.csv',
+];
+
+export const ML_REGRESSION_LOCKED_PATHS: readonly string[] = [
+  'package.json',
+  'README.md',
+  'data.mjs',
+  'eval.mjs',
+  'data/train.csv',
 ];

@@ -34,6 +34,7 @@ interface UseChallengeDraftResult {
 export function createEmptyChallenge(): ChallengeProblem {
   return {
     id: crypto.randomUUID(),
+    kind: 'workspace',
     title: '',
     statement: '',
     template: {},

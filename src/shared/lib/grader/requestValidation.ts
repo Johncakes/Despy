@@ -46,8 +46,23 @@ export function validateGradeRequest(body: unknown): string | null {
   if (!isRecord(body.submittedFiles)) return 'submittedFiles가 필요합니다.';
 
   const autoTest = body.autoTest;
-  if (!isRecord(autoTest) || typeof autoTest.totalCount !== 'number') {
-    return 'autoTest 결과가 필요합니다.';
+  if (!isRecord(autoTest)) return 'autoTest 결과가 필요합니다.';
+  const passedCount = autoTest.passedCount;
+  const totalCount = autoTest.totalCount;
+  if (typeof totalCount !== 'number') return 'autoTest 결과가 필요합니다.';
+  // autoTest는 클라이언트가 보낸 신호다(서버 재실행 전까지 신뢰 한계 — route.ts §7.2).
+  // 서버가 챌린지의 실제 테스트 수를 모르므로 진짜 검증은 불가하지만, 최소한 내부
+  // 일관성(0 ≤ passedCount ≤ totalCount, 유한수)은 이 경계에서 강제해 음수·NaN·
+  // passed>total 같은 변조/오염 페이로드가 finalScore·대시보드 집계에 새지 않게 막는다.
+  if (
+    typeof passedCount !== 'number' ||
+    !Number.isFinite(passedCount) ||
+    !Number.isFinite(totalCount) ||
+    totalCount < 0 ||
+    passedCount < 0 ||
+    passedCount > totalCount
+  ) {
+    return 'autoTest 결과가 일관되지 않습니다 (0 ≤ passedCount ≤ totalCount).';
   }
 
   const weights = isRecord(rubric.weights) ? rubric.weights : undefined;

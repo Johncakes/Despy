@@ -24,6 +24,7 @@ import type {
 import type {
   ApiConsoleRequest,
   ApiConsoleResponse,
+  MlEvalResult,
   ProjectFiles,
 } from '@/shared/core/types';
 
@@ -63,6 +64,10 @@ const REQUEST_HELPER_PATH = '.despy-request.mjs';
 /** 헬퍼 stdout에서 결과 JSON을 감싸는 센티넬(npm/node 잡음과 분리). */
 const RESP_PREFIX = '__DESPY_RESP__';
 const RESP_SUFFIX = '__DESPY_END__';
+
+/** ML 평가(eval) 스크립트가 점수 JSON을 감싸 출력하는 센티넬(학습 로그와 분리). */
+const SCORE_PREFIX = '__DESPY_SCORE__';
+const SCORE_SUFFIX = '__DESPY_SCORE_END__';
 
 /**
  * 컨테이너 안에서 실행되는 요청 스크립트 소스.
@@ -393,6 +398,127 @@ export async function sendHttpRequest(
       ok: false,
       durationMs: Date.now() - started,
       error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ── ML 평가(점수) 실행 ────────────────────────────────────────────────────
+
+/** runScoreEval 옵션 */
+export interface RunScoreEvalOptions {
+  /** 평가 프로세스 출력 스트림 콜백(학습 로그를 콘솔/점수 패널에 표시). */
+  onOutput?: OutputListener;
+  /** 이 시간 안에 끝나지 않으면 kill하고 timedOut=true로 돌려준다. */
+  timeoutMs: number;
+  /** 평가 프로세스에 넘길 환경변수(예: 고정 seed DESPY_SEED). */
+  env?: Record<string, string>;
+}
+
+/** ML 평가 실행 결과 — 점수(파싱 성공) 또는 실패 사유. */
+export interface ScoreEvalOutcome {
+  /** 점수 센티넬을 정상 파싱했는지. false면 error에 사유. */
+  ok: boolean;
+  /** 파싱된 점수(ok일 때). */
+  result?: MlEvalResult;
+  /** 실패 사유(파싱 실패·타임아웃·실행 오류). */
+  error?: string;
+  /** 평가 프로세스의 원시 출력(디버깅·콘솔 표시용). */
+  rawOutput: string;
+  /** 타임아웃으로 강제 종료되었으면 true. */
+  timedOut: boolean;
+  /** 프로세스 종료 코드(timedOut=true면 kill 값이라 신뢰 불가). */
+  exitCode: number;
+}
+
+/**
+ * ML 평가 스크립트(예: `node eval.mjs`)를 실행해 점수 센티넬을 회수한다.
+ *
+ * sendHttpRequest와 같은 일회성 spawn → 출력 버퍼링 → 센티넬 슬라이스 → JSON.parse
+ * 패턴이되, 점수 평가용이라 SCORE 센티넬을 찾고 타임아웃 가드를 둔다(학습/추론이 무한
+ * 루프거나 너무 길면 탭이 멈추는 것을 막는다 — runCommandWithTimeout과 같은 취지).
+ * 학습 로그는 onOutput으로 스트리밍해 점수 패널/콘솔에 흘린다.
+ *
+ * 실행/파싱 실패는 throw하지 않고 ok:false 결과로 돌려준다(패널에서 사유를 보여주려고).
+ */
+export async function runScoreEval(
+  command: string,
+  args: string[],
+  options: RunScoreEvalOptions,
+): Promise<ScoreEvalOutcome> {
+  const container = await bootWebContainer();
+  const process = await container.spawn(command, args, {
+    env: options.env ?? {},
+  });
+
+  let buffer = '';
+  process.output
+    .pipeTo(
+      new WritableStream<string>({
+        write(chunk) {
+          buffer += chunk;
+          options.onOutput?.(chunk);
+        },
+      }),
+    )
+    .catch(() => {
+      /* 프로세스 종료에 따른 스트림 취소는 정상 흐름이므로 무시 */
+    });
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    process.kill();
+  }, options.timeoutMs);
+
+  let exitCode: number;
+  try {
+    exitCode = await process.exit;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (timedOut) {
+    return {
+      ok: false,
+      error: `평가가 ${Math.round(options.timeoutMs / 1000)}초 안에 끝나지 않아 중단했습니다.`,
+      rawOutput: buffer,
+      timedOut,
+      exitCode,
+    };
+  }
+
+  const start = buffer.indexOf(SCORE_PREFIX);
+  const end = buffer.indexOf(SCORE_SUFFIX);
+  if (start === -1 || end === -1 || end < start) {
+    return {
+      ok: false,
+      error: `점수 출력을 찾지 못했습니다 (exit ${exitCode}). eval 스크립트가 ${SCORE_PREFIX} 센티넬을 출력하는지 확인하세요.`,
+      rawOutput: buffer,
+      timedOut,
+      exitCode,
+    };
+  }
+
+  const json = buffer.slice(start + SCORE_PREFIX.length, end);
+  try {
+    const parsed = JSON.parse(json) as MlEvalResult;
+    if (typeof parsed.value !== 'number' || !Number.isFinite(parsed.value)) {
+      return {
+        ok: false,
+        error: '점수 값이 유효한 숫자가 아닙니다.',
+        rawOutput: buffer,
+        timedOut,
+        exitCode,
+      };
+    }
+    return { ok: true, result: parsed, rawOutput: buffer, timedOut, exitCode };
+  } catch {
+    return {
+      ok: false,
+      error: '점수 JSON 파싱에 실패했습니다.',
+      rawOutput: buffer,
+      timedOut,
+      exitCode,
     };
   }
 }

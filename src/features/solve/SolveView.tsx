@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import styled, { css } from 'styled-components';
+import { useProctoringMonitor } from '@/shared/lib/hooks/useProctoringMonitor';
 import type { GradingRequest, Problem, TestCase } from '@/shared/core/types';
 import {
   SUPPORTED_LANGUAGES,
@@ -42,6 +43,10 @@ export function SolveView({ problem }: { problem: Problem }) {
   const languages = allowedLanguages.length > 0 ? allowedLanguages : SUPPORTED_LANGUAGES;
   const fallbackLanguage = languages[0];
 
+  const { log: integrityLog, isFullscreen, requestFullscreen } = useProctoringMonitor();
+  const totalAnomalies =
+    integrityLog.tabSwitchCount + integrityLog.externalPasteCount + integrityLog.fullscreenExitCount;
+
   const session = useSolveSessionStore((state) => state.sessions[problem.id]);
   const ensureSession = useSolveSessionStore((state) => state.ensureSession);
   const setCode = useSolveSessionStore((state) => state.setCode);
@@ -52,13 +57,6 @@ export function SolveView({ problem }: { problem: Problem }) {
 
   const [isAiOpen, setIsAiOpen] = useState(true);
   const gradeMutation = useGradeAlgorithm();
-
-  // 채점 완료 시 마이페이지 이력용으로 결과를 영속 저장한다.
-  useEffect(() => {
-    if (gradeMutation.data) {
-      saveResult(problem.id, gradeMutation.data);
-    }
-  }, [gradeMutation.data, problem.id, saveResult]);
 
   // AI 직접 편집 상태 (실시간 코드 미러링)
   const [isDirectEditEnabled, setIsDirectEditEnabled] = useState(true);
@@ -132,7 +130,10 @@ export function SolveView({ problem }: { problem: Problem }) {
     setLanguage(problem.id, languageId, language.defaultCode);
   };
 
-  const runGrade = (testCases: TestCase[]) => {
+  // 채점을 실행한다. isSubmission=true(제출, 전체 케이스)일 때만 결과를 마이페이지
+  // 이력에 영속한다 — "예제 실행"(공개 케이스만)은 자기 점검이라, 전체 제출과 다른
+  // (더 적은) 케이스 집합으로 산출된 점수가 "마지막 채점 결과"를 덮어쓰지 않게 한다.
+  const runGrade = (testCases: TestCase[], isSubmission: boolean) => {
     const request: GradingRequest = {
       problemId: problem.id,
       languageId: session.languageId,
@@ -140,15 +141,36 @@ export function SolveView({ problem }: { problem: Problem }) {
       sourceCode: session.code,
       testCases,
       model: problem.aiPolicy.model,
+      systemPrompt: problem.aiPolicy.systemPrompt,
     };
-    gradeMutation.mutate(request);
+    gradeMutation.mutate(
+      request,
+      isSubmission
+        ? { onSuccess: (result) => saveResult(problem.id, result) }
+        : undefined,
+    );
   };
 
   return (
     <Wrapper>
+      {!isFullscreen && (
+        <FullscreenBanner>
+          시험 모드를 위해 전체화면을 권장합니다.
+          <FullscreenButton type="button" onClick={requestFullscreen}>
+            전체화면 시작
+          </FullscreenButton>
+        </FullscreenBanner>
+      )}
       <TopBar>
         <BackLink href="/">← 목록</BackLink>
         <Title>{problem.title}</Title>
+        {totalAnomalies > 0 && (
+          <AnomalyBadge
+            title={`탭 이탈 ${integrityLog.tabSwitchCount}회 · 외부 붙여넣기 ${integrityLog.externalPasteCount}회 · 전체화면 이탈 ${integrityLog.fullscreenExitCount}회`}
+          >
+            ⚠ {totalAnomalies}
+          </AnomalyBadge>
+        )}
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
             AI 도우미 열기
@@ -187,9 +209,12 @@ export function SolveView({ problem }: { problem: Problem }) {
               onCodeChange={(code) => setCode(problem.id, code)}
               onLanguageChange={handleLanguageChange}
               onRunExamples={() =>
-                runGrade(problem.testCases.filter((testCase) => testCase.isPublic))
+                runGrade(
+                  problem.testCases.filter((testCase) => testCase.isPublic),
+                  false,
+                )
               }
-              onSubmit={() => runGrade(problem.testCases)}
+              onSubmit={() => runGrade(problem.testCases, true)}
               isGrading={gradeMutation.isPending}
               isReadOnly={isAiWritingCode}
               canUndoAiCode={aiCodeSnapshot !== null}
@@ -288,4 +313,40 @@ const EditorArea = styled.div`
 const ResultArea = styled.div`
   flex: 1;
   min-height: 0;
+`;
+
+const FullscreenBanner = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.md}`};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const FullscreenButton = styled.button`
+  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-family: inherit;
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  background: transparent;
+  border: 1px solid ${({ theme }) => theme.colors.primary};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  cursor: pointer;
+`;
+
+const AnomalyBadge = styled.span`
+  padding: ${({ theme }) => `2px ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.warning};
+  border: 1px solid ${({ theme }) => theme.colors.warning};
+  border-radius: ${({ theme }) => theme.radius.sm};
+  cursor: default;
+  white-space: nowrap;
 `;
