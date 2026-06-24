@@ -112,6 +112,49 @@ if (body) req.write(body);
 req.end();
 `;
 
+// ── 미리보기 콘솔 브리지 ──────────────────────────────────────────────────────
+
+/**
+ * 미리보기(앱) 페이지마다 주입되는 콘솔 포워딩 스크립트.
+ *
+ * 미리보기는 cross-origin iframe(webcontainer.io)이라 호스트(despy)에서 그 안의
+ * console에 직접 접근할 수 없다. 그래서 앱 스크립트보다 먼저 실행되는 이 스크립트로
+ * console.*(log/info/warn/error/debug)와 전역 에러(uncaught·unhandledrejection)를
+ * 가로채 `postMessage`로 부모(despy)에 보낸다. 부모는 useWorkspace의 message 리스너로
+ * 받아 '브라우저 콘솔' 탭에 표시한다. 인자는 문자열화해 보낸다(직렬화 불가 시 String 폴백).
+ *
+ * ⚠️ 이 문자열은 바깥 템플릿 리터럴 안에 들어가므로 백틱과 ${} 보간을 쓰지 않는다
+ *    (문자열 결합으로만 작성). __despyConsoleBridge 가드로 중복 주입을 막는다.
+ */
+const PREVIEW_CONSOLE_SCRIPT = `(() => {
+  if (window.__despyConsoleBridge) return;
+  window.__despyConsoleBridge = true;
+  var SOURCE = 'despy-console';
+  var send = function (level, args) {
+    try {
+      var parts = Array.prototype.map.call(args, function (value) {
+        if (typeof value === 'string') return value;
+        if (value instanceof Error) return value.stack || value.message;
+        try { return JSON.stringify(value); } catch (e) { return String(value); }
+      });
+      window.parent.postMessage({ source: SOURCE, level: level, message: parts.join(' ') }, '*');
+    } catch (e) { /* 부모 접근 불가 등은 무시 */ }
+  };
+  ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
+    var original = console[level] ? console[level].bind(console) : null;
+    console[level] = function () { send(level, arguments); if (original) original.apply(console, arguments); };
+  });
+  window.addEventListener('error', function (event) {
+    var where = event.filename ? ' (' + event.filename + ':' + event.lineno + ':' + event.colno + ')' : '';
+    send('error', [(event.message || 'Uncaught error') + where]);
+  });
+  window.addEventListener('unhandledrejection', function (event) {
+    var reason = event.reason;
+    var text = reason && reason.stack ? reason.stack : (reason && reason.message ? reason.message : String(reason));
+    send('error', ['Unhandled promise rejection: ' + text]);
+  });
+})();`;
+
 // ── 공개 API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -248,6 +291,17 @@ export async function startDevServer(
 /** WebContainer가 이미 부팅된 상태인지 반환한다(재진입 감지용). */
 export function isContainerBooted(): boolean {
   return containerInstance !== null;
+}
+
+/**
+ * 미리보기 콘솔 브리지를 설치한다 — 미리보기 페이지마다 PREVIEW_CONSOLE_SCRIPT를
+ * 주입해 앱의 console 및 런타임 에러를 부모로 중계한다. dev 서버(미리보기 로드)보다
+ * 먼저 호출해야 앱 코드 실행 전에 가로채기가 걸린다. setPreviewScript는 멱등이라
+ * 재진입 시 다시 호출해도 안전하다.
+ */
+export async function installPreviewConsoleBridge(): Promise<void> {
+  const container = await bootWebContainer();
+  await container.setPreviewScript(PREVIEW_CONSOLE_SCRIPT);
 }
 
 /**

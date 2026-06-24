@@ -33,6 +33,7 @@ import {
 } from '@/shared/core/stores/workspaceStore';
 import {
   bootWebContainer,
+  installPreviewConsoleBridge,
   isContainerBooted,
   killDevServer,
   mountProjectFiles,
@@ -61,6 +62,17 @@ export type WorkspacePhase =
   | 'starting'
   | 'ready'
   | 'error';
+
+/** 브라우저 콘솔(미리보기 앱) 로그 레벨 */
+export type BrowserConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+
+/** 미리보기 앱이 보낸 콘솔 1줄(브라우저 콘솔 탭 표시용) */
+export interface BrowserConsoleEntry {
+  level: BrowserConsoleLevel;
+  message: string;
+  /** 수신 시각(ms) — key·정렬용 */
+  timestamp: number;
+}
 
 export interface UseWorkspaceResult {
   // ── 런타임 상태 ──
@@ -109,6 +121,12 @@ export interface UseWorkspaceResult {
   /** 테스트 실행 실패 메시지(타임아웃·결과 파일 부재 등, 정상 실행이면 null) */
   testErrorMessage: string | null;
 
+  // ── 브라우저 콘솔 (미리보기 앱) ──
+  /** 미리보기 앱이 출력한 console.* / 런타임 에러 항목(누적, 최대 MAX_CONSOLE_ENTRIES개). */
+  consoleEntries: BrowserConsoleEntry[];
+  /** 브라우저 콘솔 항목을 모두 비운다. */
+  clearConsole: () => void;
+
   // ── 백엔드 API 요청 콘솔 ──
   /**
    * API 요청 콘솔 설정(백엔드가 있는 템플릿에만). 없으면 null(순수 프론트 — 콘솔 숨김).
@@ -137,6 +155,9 @@ export interface UseWorkspaceResult {
  * 연속 타이핑 중 IndexedDB 쓰기 폭주를 줄인다(편집 종료 후 한 번에 저장).
  */
 const WORKSPACE_PERSIST_DEBOUNCE_MS = 400;
+
+/** 브라우저 콘솔에 보관하는 최대 항목 수 — 무한 누적(메모리)을 막고 최근 것만 유지. */
+const MAX_CONSOLE_ENTRIES = 500;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -250,6 +271,10 @@ export function useWorkspace(
   const [testErrorMessage, setTestErrorMessage] = useState<string | null>(null);
   const isRunningTestsRef = useRef(false);
 
+  // 브라우저 콘솔(미리보기 앱)에서 postMessage로 받은 console.*/에러 항목.
+  const [consoleEntries, setConsoleEntries] = useState<BrowserConsoleEntry[]>([]);
+  const clearConsole = useCallback(() => setConsoleEntries([]), []);
+
   const lockedSet = useMemo(() => new Set(lockedPaths), [lockedPaths]);
   const isPathLocked = useCallback((path: string) => lockedSet.has(path), [lockedSet]);
 
@@ -284,6 +309,34 @@ export function useWorkspace(
   useEffect(() => {
     activePathRef.current = activePath;
   }, [activePath]);
+
+  // 미리보기(앱)가 보낸 콘솔 메시지를 수신해 누적한다(PREVIEW_CONSOLE_SCRIPT → postMessage).
+  // 출처는 data.source 서명으로만 가른다(미리보기는 별 출처라 origin 화이트리스트 불가).
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const data = event.data as
+        | { source?: unknown; level?: unknown; message?: unknown }
+        | null;
+      if (!data || data.source !== 'despy-console' || typeof data.message !== 'string') {
+        return;
+      }
+      const level: BrowserConsoleLevel =
+        data.level === 'info' ||
+        data.level === 'warn' ||
+        data.level === 'error' ||
+        data.level === 'debug'
+          ? data.level
+          : 'log';
+      setConsoleEntries((prev) => {
+        const next = [...prev, { level, message: data.message as string, timestamp: Date.now() }];
+        return next.length > MAX_CONSOLE_ENTRIES
+          ? next.slice(next.length - MAX_CONSOLE_ENTRIES)
+          : next;
+      });
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
 
   // 편집 델타를 debounce 후 IndexedDB(workspaceStore)에 저장한다. challengeId가
   // 없으면(PoC) 영속하지 않는다. 즉시 호출(flush=true)은 언마운트 시 사용한다.
@@ -479,6 +532,14 @@ export function useWorkspace(
       }
       await bootWebContainer();
 
+      // 미리보기 콘솔 브리지 설치(앱 console.*/에러 → 부모로 중계). dev 서버보다 먼저
+      // 호출해 앱 코드 실행 전에 가로채기가 걸리게 한다. 실패해도 워크스페이스는 계속.
+      try {
+        await installPreviewConsoleBridge();
+      } catch (bridgeError) {
+        logger.error('[useWorkspace] 미리보기 콘솔 브리지 설치 실패', bridgeError);
+      }
+
       setPhase('mounting');
       appendLog('[despy] 프로젝트 파일 mount 중…\n');
       await mountProjectFiles(initialFiles);
@@ -561,6 +622,8 @@ export function useWorkspace(
     testResult,
     isRunningTests,
     testErrorMessage,
+    consoleEntries,
+    clearConsole,
     apiConsole,
     sendApiRequest,
     questionsUsed,

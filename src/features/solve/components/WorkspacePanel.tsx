@@ -11,7 +11,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import styled, { css } from 'styled-components';
+import styled, { css, type DefaultTheme } from 'styled-components';
 import type {
   ApiConsoleConfig,
   ApiConsoleRequest,
@@ -22,7 +22,11 @@ import { Panel } from '@/shared/components/ui/Panel';
 import { Button } from '@/shared/components/ui/Button';
 import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
 import { ApiConsole } from '@/features/solve/components/ApiConsole';
-import type { WorkspacePhase } from '@/features/solve/useWorkspace';
+import type {
+  BrowserConsoleEntry,
+  BrowserConsoleLevel,
+  WorkspacePhase,
+} from '@/features/solve/useWorkspace';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -75,7 +79,7 @@ function getProgressPercent(phase: WorkspacePhase): number {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-type WorkspaceTab = 'preview' | 'api' | 'console' | 'test';
+type WorkspaceTab = 'preview' | 'api' | 'console' | 'browser' | 'test';
 
 interface WorkspacePanelProps {
   phase: WorkspacePhase;
@@ -93,6 +97,12 @@ interface WorkspacePanelProps {
   testErrorMessage: string | null;
   /** '테스트 실행' 요청 콜백 */
   onRunTests: () => void;
+
+  // ── 브라우저 콘솔 (미리보기 앱) ──
+  /** 미리보기 앱이 출력한 console.* / 런타임 에러 항목. */
+  consoleEntries: BrowserConsoleEntry[];
+  /** 브라우저 콘솔 비우기 콜백. */
+  onClearConsole: () => void;
 
   // ── 백엔드 API 요청 콘솔 ──
   /** API 콘솔 설정(백엔드가 있는 워크스페이스에만). null이면 콘솔 탭을 숨긴다. */
@@ -113,6 +123,8 @@ export function WorkspacePanel({
   isRunningTests,
   testErrorMessage,
   onRunTests,
+  consoleEntries,
+  onClearConsole,
   apiConsole,
   onSendApiRequest,
 }: WorkspacePanelProps) {
@@ -121,11 +133,17 @@ export function WorkspacePanel({
     apiConsole?.isPrimaryView ? 'api' : 'preview',
   );
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const browserEndRef = useRef<HTMLDivElement>(null);
 
   // 새 로그가 들어오면 콘솔을 맨 아래로 스크롤한다.
   useEffect(() => {
     consoleEndRef.current?.scrollIntoView({ block: 'end' });
   }, [logs]);
+
+  // 새 브라우저 콘솔 항목이 들어오면 맨 아래로 스크롤한다.
+  useEffect(() => {
+    browserEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [consoleEntries]);
 
   const meta = PHASE_META[phase];
   // 테스트는 의존성 설치가 끝난 ready 상태에서만 실행 가능.
@@ -151,6 +169,9 @@ export function WorkspacePanel({
           )}
           <Tab $active={activeTab === 'console'} onClick={() => setActiveTab('console')}>
             콘솔
+          </Tab>
+          <Tab $active={activeTab === 'browser'} onClick={() => setActiveTab('browser')}>
+            브라우저
           </Tab>
           <Tab $active={activeTab === 'test'} onClick={() => setActiveTab('test')}>
             테스트
@@ -225,6 +246,30 @@ export function WorkspacePanel({
             )}
             <div ref={consoleEndRef} />
           </Console>
+        )}
+
+        {activeTab === 'browser' && (
+          <BrowserView>
+            <BrowserToolbar>
+              <Button variant="ghost" onClick={onClearConsole} disabled={consoleEntries.length === 0}>
+                지우기
+              </Button>
+              <BrowserHint>미리보기 앱의 console 출력과 런타임 에러가 표시됩니다.</BrowserHint>
+            </BrowserToolbar>
+            <BrowserLog>
+              {consoleEntries.length === 0 ? (
+                <ConsoleEmpty>아직 콘솔 출력이 없습니다.</ConsoleEmpty>
+              ) : (
+                consoleEntries.map((entry, index) => (
+                  <ConsoleLine key={`${entry.timestamp}-${index}`} $level={entry.level}>
+                    <ConsoleLevelTag $level={entry.level}>{entry.level}</ConsoleLevelTag>
+                    <ConsoleMessage>{entry.message}</ConsoleMessage>
+                  </ConsoleLine>
+                ))
+              )}
+              <div ref={browserEndRef} />
+            </BrowserLog>
+          </BrowserView>
         )}
 
         {activeTab === 'test' && (
@@ -393,6 +438,77 @@ const Console = styled.div`
 
 const ConsoleEmpty = styled.span`
   color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// ── 브라우저 콘솔 탭 ─────────────────────────────────────────────────────────
+
+/** 레벨별 강조 색 — 레벨 태그/좌측 보더에 공통으로 쓴다. */
+function levelColor(theme: DefaultTheme, level: BrowserConsoleLevel): string {
+  if (level === 'error') return theme.colors.danger;
+  if (level === 'warn') return theme.colors.warning;
+  if (level === 'info') return theme.colors.primary;
+  if (level === 'debug') return theme.colors.textMuted;
+  return theme.colors.text;
+}
+
+const BrowserView = styled.div`
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+`;
+
+const BrowserToolbar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const BrowserHint = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const BrowserLog = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: ${({ theme }) => theme.colors.codeBg};
+  font-family: ${({ theme }) => theme.font.mono};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.5;
+  padding: ${({ theme }) => theme.spacing.sm} 0;
+`;
+
+const ConsoleLine = styled.div<{ $level: BrowserConsoleLevel }>`
+  display: flex;
+  align-items: flex-start;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: 2px ${({ theme }) => theme.spacing.md};
+  border-left: 2px solid ${({ theme, $level }) => levelColor(theme, $level)};
+  background: ${({ theme, $level }) =>
+    $level === 'error' || $level === 'warn'
+      ? `${levelColor(theme, $level)}14`
+      : 'transparent'};
+`;
+
+const ConsoleLevelTag = styled.span<{ $level: BrowserConsoleLevel }>`
+  flex-shrink: 0;
+  width: 44px;
+  text-transform: uppercase;
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme, $level }) => levelColor(theme, $level)};
+`;
+
+const ConsoleMessage = styled.span`
+  flex: 1;
+  min-width: 0;
+  color: ${({ theme }) => theme.colors.text};
+  white-space: pre-wrap;
+  word-break: break-word;
 `;
 
 // ── 테스트 탭 ───────────────────────────────────────────────────────────────

@@ -32,6 +32,7 @@ import {
 } from '@/shared/lib/utils/lineDiff';
 import { Button } from '@/shared/components/ui/Button';
 import { Modal } from '@/shared/components/ui/Modal';
+import { Markdown } from '@/shared/components/ui/Markdown';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ interface TimelineStep {
 }
 
 /** 제출 상세 모달의 탭. */
-type DetailTab = 'rubric' | 'timeline' | 'code';
+type DetailTab = 'rubric' | 'conversation' | 'timeline' | 'code';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -522,9 +523,12 @@ function SubmissionDetail({
   const finalFiles = submission.submittedFiles ?? {};
   const codeEntries = Object.entries(finalFiles);
   const timeline = buildTimeline(prompts, finalFiles);
+  // 학생이 AI에게 보낸 질문 수 — 대화 탭 카운트(이 서비스 평가의 핵심 지표).
+  const studentPromptCount = prompts.filter((turn) => turn.role === 'user').length;
 
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'rubric', label: '루브릭' },
+    { key: 'conversation', label: `대화 (${studentPromptCount})` },
     { key: 'timeline', label: `풀이 타임라인 (${timeline.length})` },
     { key: 'code', label: `제출 코드 (${codeEntries.length})` },
   ];
@@ -559,6 +563,31 @@ function SubmissionDetail({
             </CriterionScoreList>
             {submission.result.rubric.feedback && (
               <FeedbackText>{submission.result.rubric.feedback}</FeedbackText>
+            )}
+          </DetailBody>
+        )}
+
+        {activeTab === 'conversation' && (
+          <DetailBody>
+            {prompts.length === 0 ? (
+              <MutedNote>기록된 AI 대화가 없습니다.</MutedNote>
+            ) : (
+              <Conversation>
+                {prompts.map((turn, index) => (
+                  <ChatTurn key={index} $role={turn.role}>
+                    <ChatRole $role={turn.role}>
+                      {turn.role === 'user' ? '학생' : 'AI'}
+                    </ChatRole>
+                    <ChatBubble $role={turn.role}>
+                      {turn.role === 'assistant' ? (
+                        <Markdown>{turn.text || '(빈 응답)'}</Markdown>
+                      ) : (
+                        <PromptText>{turn.text || '(빈 프롬프트)'}</PromptText>
+                      )}
+                    </ChatBubble>
+                  </ChatTurn>
+                ))}
+              </Conversation>
             )}
           </DetailBody>
         )}
@@ -1156,6 +1185,50 @@ const MutedNote = styled.p`
   margin: 0;
   font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// ── 대화 탭 — 학생 프롬프트 ↔ AI 응답 트랜스크립트(채팅) ─────────────────────────
+
+const Conversation = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
+// 학생 턴은 좌측 강조(primary), AI 턴은 무채색 — 누가 말했는지 한눈에.
+const ChatTurn = styled.div<{ $role: 'user' | 'assistant' }>`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+  align-items: ${({ $role }) => ($role === 'user' ? 'flex-start' : 'stretch')};
+`;
+
+const ChatRole = styled.span<{ $role: 'user' | 'assistant' }>`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme, $role }) =>
+    $role === 'user' ? theme.colors.primary : theme.colors.textMuted};
+`;
+
+const ChatBubble = styled.div<{ $role: 'user' | 'assistant' }>`
+  width: 100%;
+  padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+  border-radius: ${({ theme }) => theme.radius.md};
+  background: ${({ theme, $role }) =>
+    $role === 'user' ? theme.colors.surfaceAlt : theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-left: ${({ theme, $role }) =>
+    $role === 'user' ? `3px solid ${theme.colors.primary}` : `1px solid ${theme.colors.border}`};
+`;
+
+// 학생 프롬프트 — 입력 그대로(줄바꿈 보존). AI 응답은 Markdown으로 렌더.
+const PromptText = styled.p`
+  margin: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.6;
+  color: ${({ theme }) => theme.colors.text};
+  white-space: pre-wrap;
+  word-break: break-word;
 `;
 
 // 풀이 타임라인 — 프롬프트(스텝)를 세로로 쌓는다.

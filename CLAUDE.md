@@ -100,7 +100,7 @@ src/
 │   │                             AiPolicyFields(공용), useProblemDraft
 │   │                             + (피벗 P4) ChallengeAuthorView, useChallengeDraft, components/
 │   │                               ChallengeForm·FileSetEditor(프리셋·잠금 토글)·RubricEditor
-│   │                               + GradingDashboardView (채점 대시보드 — 집계(점수분포·루브릭평균·AI사용량) + 제출 비교표 → 행 클릭 시 중앙 모달에서 탭(루브릭·프롬프트-앵커 diff 타임라인·제출코드). 채점 기준도 헤더 버튼의 모달로 분리)
+│   │                               + GradingDashboardView (채점 대시보드 — 집계(점수분포·루브릭평균·AI사용량) + 제출 비교표 → 행 클릭 시 중앙 모달에서 탭(루브릭·대화(학생↔AI 트랜스크립트)·프롬프트-앵커 diff 타임라인·제출코드). 채점 기준도 헤더 버튼의 모달로 분리)
 │   ├── solve/                    학생(알고리즘): SolveView, ProblemPanel, CodeEditorPanel,
 │   │                             GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
 │   │                             + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
