@@ -1,5 +1,5 @@
 /**
- * AiChatPanel.tsx — 제한된 AI 도우미 패널
+ * AiChatPanel.tsx — 제한된 AI 에이전트 패널
  *
  * 교수 정책(모델 고정·질문/토큰 한도·시스템 프롬프트) 아래에서만 동작하는 AI
  * 채팅. useChat로 /api/agent에 스트리밍 요청하고, 응답 종료 시 토큰 사용량을
@@ -236,8 +236,8 @@ export function AiChatPanel({
 
   if (!isOpen) {
     return (
-      <CollapsedBar type="button" onClick={onToggle} aria-label="AI 도우미 열기">
-        <CollapsedText>AI 도우미</CollapsedText>
+      <CollapsedBar type="button" onClick={onToggle} aria-label="AI 에이전트 열기">
+        <CollapsedText>AI 에이전트</CollapsedText>
       </CollapsedBar>
     );
   }
@@ -246,7 +246,7 @@ export function AiChatPanel({
     <Container>
       <Header>
         <HeaderTitle>
-          AI 도우미
+          AI 에이전트
           <Badge tone="info">{policy.model}</Badge>
         </HeaderTitle>
         <Button variant="ghost" onClick={onToggle}>

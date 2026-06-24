@@ -27,7 +27,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
     title: '카운터에 "초기화" 기능 바이브코딩',
     statement: [
       '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
-      'AI 도우미를 활용해 **"초기화" 버튼**을 추가하세요.',
+      'AI 에이전트를 활용해 **"초기화" 버튼**을 추가하세요.',
       '',
       '### 요구사항',
       "- `src/App.jsx`에 텍스트가 `초기화`인 버튼을 추가한다.",
@@ -87,7 +87,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
     title: '카운터에 "감소" 버튼 바이브코딩',
     statement: [
       '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
-      'AI 도우미를 활용해 **"감소" 버튼**을 추가하세요.',
+      'AI 에이전트를 활용해 **"감소" 버튼**을 추가하세요.',
       '',
       '### 요구사항',
       "- `src/App.jsx`에 텍스트가 `감소`인 버튼을 추가한다.",
@@ -139,7 +139,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
     title: '카운터에 짝/홀 표시 바이브코딩',
     statement: [
       '주어진 Vite + React 앱에는 증가 버튼만 있는 카운터가 있습니다.',
-      'AI 도우미를 활용해 현재 카운터 값이 **짝수인지 홀수인지** 화면에 표시하세요.',
+      'AI 에이전트를 활용해 현재 카운터 값이 **짝수인지 홀수인지** 화면에 표시하세요.',
       '',
       '### 요구사항',
       "- `src/App.jsx`에 현재 값이 짝수면 `짝수`, 홀수면 `홀수`라는 텍스트를 보여준다.",
@@ -191,7 +191,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
     title: 'Todo API에 "할 일 추가" 엔드포인트 바이브코딩',
     statement: [
       '주어진 Express Todo API에는 목록 조회(`GET /todos`)만 구현돼 있습니다.',
-      'AI 도우미를 활용해 **할 일을 추가하는 `POST /todos` 엔드포인트**를 구현하세요.',
+      'AI 에이전트를 활용해 **할 일을 추가하는 `POST /todos` 엔드포인트**를 구현하세요.',
       '',
       '### 요구사항',
       '- `src/app.js`의 `createApp(db)` 안에 `POST /todos` 라우트를 추가한다.',
@@ -253,7 +253,7 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
     statement: [
       '한 컨테이너에서 프론트(Vite+React)와 백(Express)이 함께 돕니다. 프론트의 "추가" 폼은',
       '이미 `POST /api/todos`를 호출하지만, **백엔드에 그 엔드포인트가 없어** 아직 동작하지 않습니다.',
-      'AI 도우미를 활용해 **`POST /api/todos`(백엔드)를 구현**해 폼이 실제로 동작하게 만드세요.',
+      'AI 에이전트를 활용해 **`POST /api/todos`(백엔드)를 구현**해 폼이 실제로 동작하게 만드세요.',
       '',
       '### 요구사항',
       '- `server/app.js`의 `createApp(db)` 안에 `POST /api/todos` 라우트를 추가한다.',

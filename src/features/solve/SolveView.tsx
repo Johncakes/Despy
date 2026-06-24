@@ -1,7 +1,7 @@
 /**
  * SolveView.tsx — 학생 풀이 화면 오케스트레이터
  *
- * 좌(문제 지문) · 중(AI 도우미, 토글) · 우(코드 에디터 + 채점 결과) 3열 레이아웃을
+ * 좌(문제 지문) · 중(AI 에이전트, 토글) · 우(코드 에디터 + 채점 결과) 3열 레이아웃을
  * 구성한다. "바이브 코딩 실력"을 시험하는 목적상 AI 채팅을 가운데 주역으로 두고,
  * AI가 작성한 코드는 우측 에디터로 흘러간다(직접 편집). 문제별 풀이 세션
  * (코드/언어/AI 사용량)은 solveSessionStore에 보관하고, 채점은
@@ -151,7 +151,7 @@ export function SolveView({ problem }: { problem: Problem }) {
         <Title>{problem.title}</Title>
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
-            AI 도우미 열기
+            AI 에이전트 열기
           </Button>
         )}
       </TopBar>

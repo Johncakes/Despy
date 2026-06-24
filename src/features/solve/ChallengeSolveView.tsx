@@ -1,7 +1,7 @@
 /**
  * ChallengeSolveView.tsx — 학생 과제 풀이 화면 오케스트레이터 (WebContainer 피벗)
  *
- * 좌(과제 지문) · 중(AI 도우미, 주역) · 우(워크스페이스: 에디터 + 미리보기) 3열
+ * 좌(과제 지문) · 중(AI 에이전트, 주역) · 우(워크스페이스: 에디터 + 미리보기) 3열
  * 레이아웃을 구성한다. 우측 워크스페이스는 useWorkspace로 WebContainer를 부팅해
  * 에디터 편집·AI 코드 반영을 모두 같은 writeFile 경로로 FS에 반영하고, Vite HMR로
  * 미리보기를 실시간 갱신한다(P1 핵심). AI 답변의 SEARCH/REPLACE 편집은 현재 파일에서
@@ -265,7 +265,7 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         {submitError && <ErrorText title={submitError}>{submitError}</ErrorText>}
         {!isAiOpen && (
           <Button variant="ghost" onClick={() => setIsAiOpen(true)}>
-            AI 도우미 열기
+            AI 에이전트 열기
           </Button>
         )}
         <NameInput
