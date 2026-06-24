@@ -69,7 +69,18 @@ export function ChallengeAuthorView() {
       </Sidebar>
 
       <Content>
-        <Panel title={editingChallenge ? '과제 편집' : '새 과제 출제'}>
+        <Panel
+          title={editingChallenge ? '과제 편집' : '새 과제 출제'}
+          actions={
+            editingChallenge ? (
+              <DashboardLink
+                href={`/author/challenge/${editingChallenge.id}/submissions`}
+              >
+                채점 현황 →
+              </DashboardLink>
+            ) : undefined
+          }
+        >
           <ChallengeForm
             key={editingId ?? 'new'}
             initialChallenge={editingChallenge}
@@ -135,6 +146,12 @@ const ItemButton = styled.button`
 
 const SolveLink = styled(Link)`
   font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.primary};
+  white-space: nowrap;
+`;
+
+const DashboardLink = styled(Link)`
+  font-size: ${({ theme }) => theme.font.sizeSm};
   color: ${({ theme }) => theme.colors.primary};
   white-space: nowrap;
 `;
