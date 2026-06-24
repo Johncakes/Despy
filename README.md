@@ -30,9 +30,12 @@ npm run dev                  # http://localhost:3000
 
 ## 기술 스택
 
-Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query · MongoDB
+Next.js (App Router) · React 19 · TypeScript · styled-components · Zustand · TanStack Query
 
-(예정) Monaco Editor · Judge0 (Docker) · LLM API
+> **방향**: 백엔드 최소화 · MongoDB 지양 (가능하면 프론트엔드 중심 + 외부 서비스로 해결).
+> `shared/lib/db/mongodb.ts`·`MONGODB_URI`는 임시이며 DB 미사용 확정 시 제거 대상입니다.
+
+(예정) Monaco Editor · Judge0 · LLM API
 
 ## 아키텍처 / 컨벤션
 
