@@ -26,15 +26,17 @@ AI 코딩 도구가 보편화된 환경에서, "AI를 효과적으로 부려 문
 >   따라서 시스템 프롬프트 비밀성·질문/토큰 한도는 **UX 수준**이며 변조 불가능한
 >   보안 수준은 아니다(무서버세션 한계). 백엔드는 키 은닉·프록시 용도로만 최소 사용.
 
-### 🧭 아키텍처 방향 (확정)
+### 🧭 아키텍처 방향 (갱신: 2026-06-24 — 백엔드 최소화 원칙 **해제**)
 
-- **백엔드 최소화**: 가능한 한 별도 백엔드 서버를 두지 않고 프론트엔드 중심으로 구현한다.
-  서버 로직이 불가피한 경우에만 Next.js Route Handler 등 최소 범위로 둔다.
-- **MongoDB 지양**: 가능하면 사용하지 않는다. 상태/데이터는 클라이언트 또는 외부 서비스(예:
-  LLM API, Judge0)로 해결하는 방안을 우선 검토한다.
-  → `shared/lib/db/mongodb.ts`와 `MONGODB_URI` 환경 변수는 **임시 비계약(optional)** 이며,
-    DB를 쓰지 않기로 최종 확정되면 제거 대상이다.
-- ⚠️ 이 방향과 충돌하는 결정(백엔드 도입, DB 채택 등)은 Blocking — 코드 작성 전 반드시 논의한다.
+- **백엔드는 가치가 있는 곳에 둔다.** 기존 "백엔드 최소화" 원칙은 **해제**되었다(2026-06-24).
+  채점 무결성·민감정보(루브릭·테스트파일·시스템 프롬프트) 은닉처럼 **서버가 더 적합한 책임**은
+  Next.js Route Handler(또는 별도 서비스)로 구현한다. 단 불필요한 복잡도는 여전히 피하고,
+  단순해도 되는 것은 클라이언트에 둔다.
+- **DB는 필요 시 도입 가능.** 기존 "MongoDB 지양"은 완화되어, 영속이 필요하면 저장소를 도입한다.
+  구체적 선택(IndexedDB·Postgres·MongoDB 등)은 요구사항이 구체화되는 시점에 사안별로 결정한다.
+  → `shared/lib/db/mongodb.ts`·`MONGODB_URI`는 현재 미사용(스타터 잔재).
+- ⚠️ 새 백엔드 서비스·DB·외부 의존성을 *추가*하는 것은 영향이 크므로 도입 전 논의(Blocking)한다 —
+  단 "백엔드를 두는 것 자체"는 더 이상 금지가 아니다.
 
 ---
 
@@ -58,7 +60,7 @@ npm run test         # vitest 실행
   · **WebContainer**(`@webcontainer/api`, 브라우저 내 Node 런타임 — 피벗 P0~)
   - ⚠️ WebContainer는 cross-origin isolation이 필수라 `next.config.ts`가 모든 응답에
     COOP(`same-origin`)+COEP(`require-corp`) 헤더를 주입한다. 새 외부 CDN/폰트 도입 시 CORP/CORS 점검 필수.
-  - _(MongoDB는 지양 — 위 「아키텍처 방향」 참조. 현재 코드 미사용. 도입 시 별도 논의)_
+  - _(MongoDB는 현재 미사용 — 위 「아키텍처 방향」 참조. 영속 도입 시 저장소는 사안별 결정)_
 
 ---
 
@@ -82,8 +84,8 @@ src/
 │   │                             AiPolicyFields, useProblemDraft
 │   └── solve/                    학생: SolveView, ProblemPanel, CodeEditorPanel,
 │                                 AiChatPanel, GradingResultPanel
-│                                 + (P0 신규) WorkspacePlaygroundView, useWorkspace,
-│                                   components/WorkspacePanel (WebContainer 워크스페이스)
+│                                 + (피벗) WorkspacePlaygroundView, useWorkspace, components/
+│                                   WorkspacePanel·WorkspaceEditorPanel·FileTree (WebContainer 워크스페이스)
 │
 └── shared/                       공유 레이어 (4개 그룹)
     ├── core/                     데이터 & 상태
@@ -95,7 +97,7 @@ src/
     │                             webcontainerTemplates.ts (P0 신규 — 샘플 Vite+React 트리)
     ├── lib/                      재사용 로직
     │   ├── db/                   mongodb.ts (현재 미사용 — DB 지양 방향)
-    │   ├── webcontainer/         runtime.ts (P0 신규 — WebContainer 싱글턴 부팅·mount·spawn 래퍼)
+    │   ├── webcontainer/         runtime.ts (싱글턴 부팅·mount·spawn) · fileSync.ts (편집→FS debounce 동기화)
     │   ├── utils/                logger.ts, markdownCode.ts (AI 코드블록 추출)
     │   └── hooks/                useHasMounted.ts (hydration 가드)
     ├── components/               모든 UI 컴포넌트
@@ -148,7 +150,7 @@ interface ListProps {
 - 서버 응답을 Zustand에 **복사 저장 금지** (Query 캐시가 단일 출처)
 - 데이터 호출은 `*Api.ts`에만. 컴포넌트는 Query 훅만 사용
 - Query key는 배열 팩토리로 중앙화: `queryKeys.{domain}.detail(id)` (`shared/core/queries/queryKeys.ts`)
-- _(MongoDB 사용 시에만)_ **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — 단 본 프로젝트는 DB/백엔드 최소화 방향이므로 새 코드에서 기본 채택하지 않는다
+- _(MongoDB 사용 시에만)_ **연결 싱글턴**(`shared/lib/db/mongodb.ts`)으로 dev hot-reload 커넥션 누수 방지 — DB 도입은 사안별 결정이며(2026-06-24 백엔드 최소화 해제), 저장소를 추가할 땐 별도 논의한다
 
 **현재 구현**
 - 서버 데이터: 채점은 **mutation**(`useGradeSubmission`, `shared/core/queries/judgeQueries.ts`).

@@ -2,8 +2,10 @@
  * index.ts — 공유 도메인 타입 단일 출처 (배럴)
  *
  * 여러 레이어에서 공유되는 도메인 타입을 이곳에 단일 출처로 정의한다.
- * despy의 핵심 도메인: 문제(Problem) · AI 정책(AiPolicy) · 테스트 케이스(TestCase) ·
- * 채점 결과(GradingResult) · AI 대화 사용량(AgentUsage).
+ * despy의 핵심 도메인: 과제(ChallengeProblem) · 루브릭(GradingRubric) · 워크스페이스
+ * 파일트리(ProjectFiles) · 종합 채점(ChallengeGradingResult) · AI 정책(AiPolicy) ·
+ * AI 대화 사용량(AgentUsage). 구 알고리즘 모델(Problem/TestCase/GradingResult/
+ * GradingRequest)은 P5 정리 단계에서 제거 예정이다(피벗 — docs/spec-webcontainer.md).
  * feature 전용 타입은 해당 feature 폴더에 두고, 공유되는 것만 여기로 승격한다.
  *
  * 사용처: features/*, shared/* 전반 (`@/shared/core/types`)
@@ -21,6 +23,109 @@
  * (docs/spec-webcontainer.md §4.1)
  */
 export type ProjectFiles = Record<string, string>;
+
+// ── 과제(Challenge) — WebContainer 피벗 모델 ───────────────────────────────
+//
+// 알고리즘 표준입출력(Problem/TestCase/GradingRequest)을 대체하는 실무형 웹 과제
+// 모델이다. 교수가 시작 파일트리·잠금경로·테스트·루브릭·AI정책을 출제하고, 학생은
+// WebContainer 워크스페이스에서 풀이한 뒤 자동 테스트 + AI 루브릭으로 채점받는다.
+// (docs/spec-webcontainer.md §4) 구 Problem 계열은 P5 정리 단계에서 제거된다.
+
+/**
+ * 채점 루브릭 항목. AI 정성 채점의 단위 기준이다(예: "장바구니가 비었을 때 예외 처리").
+ */
+export interface RubricCriterion {
+  id: string;
+  /** 채점 항목 설명 */
+  description: string;
+  /** 이 항목 만점 */
+  maxScore: number;
+}
+
+/**
+ * 과제 채점 루브릭. 자동 테스트 통과율과 AI 루브릭 점수를 weights로 가중합한다(합 1.0).
+ */
+export interface GradingRubric {
+  criteria: RubricCriterion[];
+  /** 최종 점수 가중치 (tests + rubric = 1.0) */
+  weights: {
+    /** 자동 테스트 통과율 비중 */
+    tests: number;
+    /** AI 루브릭 점수 비중 */
+    rubric: number;
+  };
+}
+
+/**
+ * 과제(Challenge). 교수가 출제하는 실무형 웹 과제의 단일 출처다.
+ *
+ * template은 학생에게 주어지는 시작 파일트리(주어진 백엔드/API 포함), testFiles는
+ * 채점용 테스트(학생 비노출, 제출 시점에 주입). 채점 무결성을 위해 공식 점수는
+ * 서버(/api/grade)가 testFiles로 재실행해 산출한다(§7.2).
+ */
+export interface ChallengeProblem {
+  id: string;
+  title: string;
+  /** 마크다운 지문 (요구사항·시나리오) */
+  statement: string;
+
+  // ── 워크스페이스 ──
+  /** 학생에게 주어지는 시작 파일트리 (주어진 백엔드/API 포함) */
+  template: ProjectFiles;
+  /** 학생이 편집할 수 없는 경로(주어진 API·골격). 에디터 read-only */
+  lockedPaths: string[];
+  /** 학생 주 작업 영역 경로(강조 표시용, 비면 lockedPaths의 보수) */
+  editablePaths: string[];
+
+  // ── 실행 명령 ──
+  setupCommands: string[]; // 예: ['npm install']
+  devCommand: string; // 예: 'npm run dev'
+  testCommand: string; // 예: 'npm test'
+
+  // ── 채점 ──
+  /** 채점용 테스트 파일트리(학생 비노출, 제출 시점에 FS에 주입) */
+  testFiles: ProjectFiles;
+  /** AI 정성 채점 기준 */
+  rubric: GradingRubric;
+
+  // ── AI 통제 (기존 재활용) ──
+  aiPolicy: AiPolicy;
+
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * 자동 테스트(WebContainer 내 실행) 결과. 풀이 중엔 클라이언트 즉시 피드백용,
+ * 공식 점수는 서버 재실행 결과를 신뢰한다(§7.2).
+ */
+export interface AutoTestResult {
+  passedCount: number;
+  totalCount: number;
+  cases: { name: string; passed: boolean; message?: string }[];
+}
+
+/**
+ * AI 루브릭 채점(Gemini, 구조화 출력) 결과.
+ */
+export interface RubricGradingResult {
+  scores: { criterionId: string; score: number; reason: string }[];
+  totalScore: number;
+  maxScore: number;
+  feedback: string;
+}
+
+/**
+ * 종합 채점 결과 — 자동 테스트 + AI 루브릭을 weights로 가중합한 최종 점수.
+ */
+export interface ChallengeGradingResult {
+  problemId: string;
+  autoTest: AutoTestResult;
+  rubric: RubricGradingResult;
+  /** weights로 가중합한 최종 점수(0~100) */
+  finalScore: number;
+  submittedAt: number;
+}
 
 // ── 언어 ────────────────────────────────────────────────────────────────
 

@@ -138,3 +138,15 @@ button:hover {
 }
 `,
 };
+
+/**
+ * 샘플 템플릿에서 학생이 편집할 수 없는(read-only) 경로.
+ *
+ * "주어진 설정/골격"을 표현한다 — 빌드 설정·HTML 셸은 잠그고 src/* 만 편집 가능.
+ * 본 출제 도구(P4)에서는 과제별 lockedPaths로 대체된다.
+ */
+export const VITE_REACT_SAMPLE_LOCKED_PATHS: readonly string[] = [
+  'package.json',
+  'vite.config.js',
+  'index.html',
+];
