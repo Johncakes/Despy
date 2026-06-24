@@ -1,0 +1,46 @@
+{
+  "name": "despy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "에이전틱 코딩 평가 시스템 — AI 에이전트를 통제된 범위에서 활용해 알고리즘 문제를 푸는 능력을 평가하는 웹 서비스",
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "bash -c 'tsc --noEmit'",
+      "eslint --fix"
+    ]
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.1",
+    "mongodb": "^7.3.0",
+    "next": "^16.2.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "styled-components": "^6.4.2",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.9",
+    "eslint-plugin-import": "^2.32.0",
+    "husky": "^9.1.7",
+    "jsdom": "^29.1.1",
+    "lint-staged": "^16.4.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
