@@ -173,6 +173,29 @@ export interface ApiConsoleConfig {
    * 백엔드 템플릿이 파일 백업 db를 쓸 때만 주어진다. 없으면 DB 탭을 숨긴다.
    */
   dbFilePath?: string;
+  /**
+   * 백엔드 소스에서 추론한 라우트 목록(Swagger식 목록·요청 프리필용).
+   * 라이브 파일 기준으로 갱신되므로 학생이 라우트를 추가하면 즉시 반영된다.
+   */
+  endpoints: ApiEndpoint[];
+  /**
+   * 데이터 상태 뷰가 호출해 보여줄 컬렉션 조회 경로(첫 무파라미터 GET, 없으면 defaultPath).
+   * API 호출로 데이터가 어떻게 변하는지 이 경로의 응답으로 확인한다.
+   */
+  dataPath: string;
+}
+
+/**
+ * 백엔드 소스에서 추론한 단일 라우트 — API 콘솔의 Swagger식 목록 한 줄.
+ *
+ * Express 라우트 정의(app.get('/todos', …) 등)를 정규식으로 best-effort 파싱한 결과다.
+ * 클릭하면 콘솔 요청 바에 메서드·경로가 채워진다.
+ */
+export interface ApiEndpoint {
+  /** HTTP 메서드(대문자, 예: 'GET'·'POST'). */
+  method: string;
+  /** 라우트 경로(파라미터 포함 가능, 예: '/todos'·'/todos/:id'). */
+  path: string;
 }
 
 /**

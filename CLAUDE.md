@@ -106,7 +106,7 @@ src/
 │   │                             GradingResultPanel (AI 채점 결과 — 케이스별 근거·종합 피드백)
 │   │                             + (피벗 P1) ChallengeSolveView, ChallengeStatementPanel,
 │   │                               AiChatPanel(공용 — aiPolicy 주입), useWorkspace, components/
-│   │                               WorkspacePanel(미리보기·API 콘솔·API 로그·DB 상태·콘솔·브라우저·테스트 탭)·WorkspaceEditorPanel·FileTree(VSC식 중첩 트리·동적 CRUD: 생성/삭제/이름변경/이동)·FileTreeIcons(인라인 SVG 아이콘)·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 요청 콘솔 — Postman 라이트)·ApiLogList(요청/응답 실시간 로그)·DbInspector(저장소 db.json 실시간 표)
+│   │                               WorkspacePanel(탭: 미리보기[풀스택]·데이터[백엔드면 미리보기 대신 노출]·API 콘솔·API 로그·DB 상태·콘솔·브라우저·테스트)·WorkspaceEditorPanel·FileTree(VSC식 중첩 트리·동적 CRUD: 생성/삭제/이름변경/이동)·FileTreeIcons(인라인 SVG 아이콘)·WorkspacePlaygroundView·ApiConsole(백엔드 라이브 콘솔 — Swagger식 엔드포인트 목록(소스에서 라우트 추론·클릭 프리필)·요청 전송·응답)·DataTablePanel(데이터 상태 테이블 뷰 — 컬렉션 조회 결과를 표로, API 콘솔의 변경 요청 시 자동 갱신·수동 새로고침·데이터 초기화(dev 서버 재시작). apiData·refreshApiData는 useWorkspace가 소유)·ApiLogList(요청/응답 실시간 로그)·DbInspector(저장소 db.json 실시간 표)
 │   │                               + (피벗 P3) ChallengeGradingResultPanel(제출 채점 결과 모달)
 │   ├── mypage/                   마이페이지: MyPageView (알고리즘 풀이 이력 카드 그리드 + 과제 제출 테이블 — 로컬 스토어 집계)
 │   ├── auth/                     인증: LoginView, SignupView (이메일/비번 + JWT)

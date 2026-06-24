@@ -340,6 +340,10 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
               apiLogs={workspace.apiLogs}
               onClearApiLogs={workspace.clearApiLogs}
               dbState={workspace.dbState}
+              apiData={workspace.apiData}
+              isApiDataLoading={workspace.isApiDataLoading}
+              onRefreshApiData={() => void workspace.refreshApiData()}
+              onResetData={workspace.resetData}
             />
           </PreviewArea>
         </WorkspaceColumn>

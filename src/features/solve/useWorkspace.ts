@@ -24,6 +24,7 @@ import type {
   ApiConsoleConfig,
   ApiConsoleRequest,
   ApiConsoleResponse,
+  ApiEndpoint,
   ApiLogEntry,
   AutoTestResult,
   ProjectFiles,
@@ -140,6 +141,20 @@ export interface UseWorkspaceResult {
    * 백엔드가 없는 템플릿이면 ok:false 응답을 돌려준다.
    */
   sendApiRequest: (request: ApiConsoleRequest) => Promise<ApiConsoleResponse>;
+  /**
+   * 데이터 상태 뷰(테이블)가 보여줄 컬렉션 조회 결과(미로드면 null). API 호출로 데이터가
+   * 바뀌면(sendApiRequest의 변경 요청·resetData) 자동 갱신된다.
+   */
+  apiData: ApiConsoleResponse | null;
+  /** 데이터 상태 뷰를 다시 불러오는 중인지. */
+  isApiDataLoading: boolean;
+  /** 데이터 상태 뷰를 수동 갱신한다(컬렉션 경로 GET). 백엔드 없으면 no-op. */
+  refreshApiData: () => Promise<void>;
+  /**
+   * 데이터 초기화 — dev 서버를 재시작해 인메모리 저장소를 초기 상태로 되돌린다.
+   * 백엔드가 없는 템플릿이면 no-op. 진행 상태는 phase('starting'→'ready')로 노출된다.
+   */
+  resetData: () => Promise<void>;
 
   // ── 백엔드 실시간 모니터 ──
   /**
@@ -233,7 +248,57 @@ function inferApiConsoleConfig(template: ProjectFiles): ApiConsoleConfig | null 
     defaultPath: hasFrontend ? '/api/todos' : '/todos',
     isPrimaryView: !hasFrontend,
     dbFilePath,
+    endpoints: [],
+    dataPath: hasFrontend ? '/api/todos' : '/todos',
   };
+}
+
+/** 백엔드 라우트가 정의되는 소스 파일들(추론 대상). 위에서부터 우선 스캔한다. */
+const BACKEND_SOURCE_PATHS = [
+  'src/app.js',
+  'server/app.js',
+  'src/server.js',
+  'server/index.js',
+] as const;
+
+/** `app.get('/todos', …)`·`router.post('/todos', …)` 형태의 Express 라우트 정의 매칭. */
+const ROUTE_DEFINITION_REGEX =
+  /\b(?:app|router)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*[`'"]([^`'"]+)[`'"]/gi;
+
+/**
+ * 백엔드 소스에서 Express 라우트를 정규식으로 추론한다(Swagger식 목록용 · best-effort).
+ *
+ * 라이브 파일을 스캔하므로 학생이 새 라우트를 구현하면 즉시 목록에 나타난다. 동적으로
+ * 등록되는 라우트(반복문·변수 경로)는 잡지 못하지만, 콘솔 목록·프리필 용도라 충분하다.
+ */
+function parseEndpoints(files: ProjectFiles): ApiEndpoint[] {
+  const seen = new Set<string>();
+  const endpoints: ApiEndpoint[] = [];
+  for (const path of BACKEND_SOURCE_PATHS) {
+    const source = files[path];
+    if (!source) continue;
+    for (const match of source.matchAll(ROUTE_DEFINITION_REGEX)) {
+      const method = match[1].toUpperCase();
+      const routePath = match[2];
+      const key = `${method} ${routePath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      endpoints.push({ method, path: routePath });
+    }
+  }
+  return endpoints;
+}
+
+/**
+ * 데이터 상태 뷰가 보여줄 컬렉션 조회 경로를 고른다 — 첫 무파라미터(:id 없는) 비루트 GET.
+ * 적당한 후보가 없으면 fallback(템플릿 기본 경로)을 쓴다.
+ */
+function pickDataPath(endpoints: ApiEndpoint[], fallback: string): string {
+  const collection = endpoints.find(
+    (endpoint) =>
+      endpoint.method === 'GET' && !endpoint.path.includes(':') && endpoint.path !== '/',
+  );
+  return collection?.path ?? fallback;
 }
 
 /** 초기 활성 파일: src/App.jsx 우선, 없으면 첫 편집 가능 파일, 그것도 없으면 첫 파일 */
@@ -326,22 +391,64 @@ export function useWorkspace(
   const lockedSet = useMemo(() => new Set(lockedPaths), [lockedPaths]);
   const isPathLocked = useCallback((path: string) => lockedSet.has(path), [lockedSet]);
 
-  // 백엔드 API 요청 콘솔 설정 — 템플릿에서 추론(백엔드 없으면 null). 템플릿은 안정적이라 1회 계산.
-  const apiConsole = useMemo(() => inferApiConsoleConfig(template), [template]);
+  // 백엔드 API 요청 콘솔 설정 — 템플릿에서 백엔드 유무를 추론하고(없으면 null), 라우트 목록은
+  // 라이브 파일에서 파싱해 합친다(학생이 라우트를 추가하면 Swagger식 목록이 즉시 갱신).
+  const apiConsole = useMemo<ApiConsoleConfig | null>(() => {
+    const base = inferApiConsoleConfig(template);
+    if (!base) return null;
+    const endpoints = parseEndpoints(files);
+    return { ...base, endpoints, dataPath: pickDataPath(endpoints, base.defaultPath) };
+  }, [template, files]);
+
+  // 백엔드 포트는 apiConsole(라이브 파일로 매 편집 재계산)에서 떼어내 안정값으로 쓴다 —
+  // sendApiRequest/resetData가 편집마다 재생성돼 콜백 신원이 흔들리는 것을 막는다(백엔드 없으면 null).
+  const apiPort = apiConsole?.port ?? null;
+
+  // 데이터 상태 뷰가 보여줄 컬렉션 경로를 ref로 미러링 — 콜백(refreshApiData)을 안정 신원으로
+  // 유지하면서도 최신 dataPath를 읽는다(apiConsole은 편집마다 새 객체라 deps에 넣으면 불안정).
+  const dataPathRef = useRef<string>('');
+  useEffect(() => {
+    dataPathRef.current = apiConsole?.dataPath ?? '';
+  }, [apiConsole]);
+
+  // 데이터 상태 뷰(테이블) 상태 — 컬렉션 조회 결과. API 호출로 데이터가 바뀌면 갱신된다.
+  const [apiData, setApiData] = useState<ApiConsoleResponse | null>(null);
+  const [isApiDataLoading, setIsApiDataLoading] = useState(false);
+
+  // 데이터 상태 뷰 갱신 — 컬렉션 경로를 GET해 현재 데이터를 받아온다(백엔드 없으면 no-op).
+  const refreshApiData = useCallback(async () => {
+    if (apiPort === null || dataPathRef.current.length === 0) return;
+    setIsApiDataLoading(true);
+    try {
+      const result = await sendHttpRequest({
+        method: 'GET',
+        path: dataPathRef.current,
+        port: apiPort,
+      });
+      setApiData(result);
+    } finally {
+      setIsApiDataLoading(false);
+    }
+  }, [apiPort]);
 
   // 컨테이너 안에서 백엔드로 요청을 보낸다(콘솔 'Send'). 백엔드 없으면 ok:false로 안내.
+  // 변경 요청(GET 외)이 성공적으로 도달하면 데이터 상태 뷰를 자동 갱신해 변화를 보여준다.
   const sendApiRequest = useCallback(
     async (request: ApiConsoleRequest): Promise<ApiConsoleResponse> => {
-      if (!apiConsole) {
+      if (apiPort === null) {
         return {
           ok: false,
           durationMs: 0,
           error: '이 워크스페이스에는 백엔드 API가 없습니다.',
         };
       }
-      return sendHttpRequest({ ...request, port: apiConsole.port });
+      const result = await sendHttpRequest({ ...request, port: apiPort });
+      if (result.ok && request.method.toUpperCase() !== 'GET') {
+        void refreshApiData();
+      }
+      return result;
     },
-    [apiConsole],
+    [apiPort, refreshApiData],
   );
 
   const appendLog = useCallback((chunk: string) => {
@@ -655,13 +762,15 @@ export function useWorkspace(
       setPreviewUrl(url);
       setPhase('ready');
       appendLog(`[despy] 미리보기 준비 완료 → ${url}\n`);
+      // 백엔드가 있으면 데이터 상태 뷰(테이블)를 첫 로드한다(없으면 no-op).
+      void refreshApiData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setErrorMessage(message);
       setPhase('error');
       logger.error('[useWorkspace] 워크스페이스 시작 실패', error);
     }
-  }, [template, challengeId, appendLog, handleDevOutput]);
+  }, [template, challengeId, appendLog, handleDevOutput, refreshApiData]);
 
   useEffect(() => {
     if (hasStartedRef.current) return;
@@ -724,6 +833,32 @@ export function useWorkspace(
     if (typeof window !== 'undefined') window.location.reload();
   }, []);
 
+  // 데이터 초기화 — 인메모리 저장소는 dev 서버 프로세스 안에 있으므로, 서버를 재시작해야
+  // 초기 상태로 돌아간다(파일은 이미 FS에 동기화돼 있어 재mount 없이 재시작만 한다).
+  const resetData = useCallback(async () => {
+    if (apiPort === null) return;
+    killDevServer();
+    setPreviewUrl(null);
+    setPhase('starting');
+    appendLog('[despy] 데이터 초기화 — dev 서버 재시작 중…\n');
+    try {
+      const { url } = await startDevServer('npm', ['run', 'dev'], {
+        onOutput: appendLog,
+        previewPort: inferPreviewPort(template),
+      });
+      setPreviewUrl(url);
+      setPhase('ready');
+      appendLog('[despy] 데이터 초기화 완료 — 서버가 초기 상태로 재시작됐습니다.\n');
+      // 초기 상태로 돌아간 데이터를 다시 읽어 테이블을 갱신한다.
+      void refreshApiData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorMessage(message);
+      setPhase('error');
+      logger.error('[useWorkspace] 데이터 초기화(재시작) 실패', error);
+    }
+  }, [apiPort, appendLog, template, refreshApiData]);
+
   return {
     phase,
     logs,
@@ -750,6 +885,10 @@ export function useWorkspace(
     apiLogs,
     clearApiLogs,
     dbState,
+    apiData,
+    isApiDataLoading,
+    refreshApiData,
+    resetData,
     questionsUsed,
     tokensUsed,
     recordAiTurn,

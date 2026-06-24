@@ -25,6 +25,7 @@ import { Badge, type BadgeTone } from '@/shared/components/ui/Badge';
 import { ApiConsole } from '@/features/solve/components/ApiConsole';
 import { ApiLogList } from '@/features/solve/components/ApiLogList';
 import { DbInspector } from '@/features/solve/components/DbInspector';
+import { DataTablePanel } from '@/features/solve/components/DataTablePanel';
 import type {
   BrowserConsoleEntry,
   BrowserConsoleLevel,
@@ -82,7 +83,15 @@ function getProgressPercent(phase: WorkspacePhase): number {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-type WorkspaceTab = 'preview' | 'api' | 'apilog' | 'db' | 'console' | 'browser' | 'test';
+type WorkspaceTab =
+  | 'preview'
+  | 'data'
+  | 'api'
+  | 'apilog'
+  | 'db'
+  | 'console'
+  | 'browser'
+  | 'test';
 
 interface WorkspacePanelProps {
   phase: WorkspacePhase;
@@ -120,6 +129,16 @@ interface WorkspacePanelProps {
   onClearApiLogs?: () => void;
   /** 저장소(db.json) 현재 상태(파싱된 JSON, DB 상태 탭). apiConsole.dbFilePath 있을 때 표시. */
   dbState?: unknown;
+
+  // ── 데이터 상태 테이블 ──
+  /** 데이터 상태 뷰(테이블)가 보여줄 컬렉션 조회 결과. apiConsole이 있을 때만 사용한다. */
+  apiData?: ApiConsoleResponse | null;
+  /** 데이터 상태 뷰를 다시 불러오는 중인지. */
+  isApiDataLoading?: boolean;
+  /** 데이터 상태 뷰 수동 새로고침 콜백. apiConsole이 있을 때만 사용한다. */
+  onRefreshApiData?: () => void;
+  /** 데이터 초기화 콜백(dev 서버 재시작). apiConsole이 있을 때만 사용한다. */
+  onResetData?: () => Promise<void>;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -141,10 +160,18 @@ export function WorkspacePanel({
   apiLogs = [],
   onClearApiLogs,
   dbState,
+  apiData,
+  isApiDataLoading,
+  onRefreshApiData,
+  onResetData,
 }: WorkspacePanelProps) {
-  // 백엔드 단독(프론트 미리보기 없음)이면 콘솔을 주 탭으로 연다(미리보기는 raw JSON뿐).
+  // 백엔드 단독(프론트 미리보기 없음)이면 미리보기(raw JSON) 대신 데이터 테이블을 주 탭으로,
+  // 미리보기 탭은 숨긴다. 풀스택(프론트 있음)은 미리보기·데이터 탭을 모두 노출한다.
+  const isBackendOnly = apiConsole?.isPrimaryView ?? false;
+  const showPreviewTab = !isBackendOnly;
+  const showDataTab = apiConsole != null;
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(
-    apiConsole?.isPrimaryView ? 'api' : 'preview',
+    isBackendOnly ? 'data' : 'preview',
   );
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const browserEndRef = useRef<HTMLDivElement>(null);
@@ -173,9 +200,16 @@ export function WorkspacePanel({
       }
       actions={
         <Actions>
-          <Tab $active={activeTab === 'preview'} onClick={() => setActiveTab('preview')}>
-            미리보기
-          </Tab>
+          {showPreviewTab && (
+            <Tab $active={activeTab === 'preview'} onClick={() => setActiveTab('preview')}>
+              미리보기
+            </Tab>
+          )}
+          {showDataTab && (
+            <Tab $active={activeTab === 'data'} onClick={() => setActiveTab('data')}>
+              데이터
+            </Tab>
+          )}
           {apiConsole && onSendApiRequest && (
             <Tab $active={activeTab === 'api'} onClick={() => setActiveTab('api')}>
               API 콘솔
@@ -252,6 +286,17 @@ export function WorkspacePanel({
               )}
             </StatusOverlay>
           ))}
+
+        {activeTab === 'data' && apiConsole && (
+          <DataTablePanel
+            dataPath={apiConsole.dataPath}
+            data={apiData ?? null}
+            isLoading={isApiDataLoading ?? false}
+            isReady={phase === 'ready'}
+            onRefresh={() => onRefreshApiData?.()}
+            onReset={onResetData}
+          />
+        )}
 
         {activeTab === 'api' && apiConsole && onSendApiRequest && (
           <ApiConsole
