@@ -274,6 +274,14 @@ src/
   ⚠️ MVP 한계: 인증·서버 집계 없음 → 이 브라우저에서 이뤄진 제출만, 식별은 입력 이름에 의존.
   검증: 단위테스트(submissionStore) + headless Chrome로 시드 렌더(이름·점수·최신순·루브릭·피드백) 8/8,
   프롬프트·코드 표시 6/6, 실제 제출→대시보드 e2e PASS.
+  - ✅ **대시보드 가시성 개선(코테 플랫폼 참고)**: ① **집계 band**(평균·중앙값·최고·테스트평균·질문중앙값
+    + 점수 분포 히스토그램) + **정렬(최신/점수/이름)·이름 검색** ② **루브릭 항목별 제출 평균**(어느 기준에서
+    막혔는지) ③ **AI 활용 지표**(제출별 질문수·토큰 칩 + 집계) — `submissionStore.aiUsage` 캡처
+    ④ **점수대별 색 배지**(80↑/60–79/60↓). 핵심: ⑤ **프롬프트-앵커 diff 타임라인** — 각 user 턴의
+    **작성 시점 코드 스냅샷**(`SubmissionPromptTurn.filesAtSend`, `ChallengeSolveView`가 전송 시 캡처)을
+    연속 비교해 "그 프롬프트가 만든 변경점"을 GitHub식 +/− 로 보여준다(`shared/lib/utils/lineDiff.ts` LCS).
+    검증: lineDiff 단위테스트 + headless 종합 실측 17/17 PASS(집계·히스토그램·정렬·AI사용량·루브릭평균·
+    프롬프트별 diff(OLD→NEW)).
 - ✅ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — in-memory 버퍼·AI 사용량 대체.
   `idbStorage`(네이티브 어댑터) + `workspaceStore`(델타) + `useWorkspace`(복원/저장·hasHydrated 게이트)
   + `ChallengeSolveView`(AI 사용량 영속화). headless Chrome로 편집→IDB 저장→새로고침 복원 실측 PASS.

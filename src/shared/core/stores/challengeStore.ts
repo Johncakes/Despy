@@ -7,7 +7,7 @@
  * 그 영속은 P4에서 IndexedDB로 도입한다 — docs/spec-webcontainer.md §9.1.)
  * 저장된 과제가 없으면 샘플 과제로 시드한다.
  *
- * persist key: 'despy-challenges' (version 1)
+ * persist key: 'despy-challenges' (version 2)
  *
  * 사용처: features/author(CRUD, P4), features/solve(읽기), app 홈(목록)
  */
@@ -63,7 +63,12 @@ export const useChallengeStore = create<ChallengeStoreState>()(
     }),
     {
       name: 'despy-challenges',
-      version: 1,
+      version: 2,
+      // v1→v2: RubricCriterion에 levels?·rationale?(둘 다 optional)를 추가했다. 기존
+      // 항목은 두 필드가 없을 뿐 그대로 유효하므로 데이터 변환이 필요 없다. 다만
+      // version만 올리고 migrate를 비우면 persist가 구버전 상태를 폐기해 저장된 과제가
+      // 사라지므로, 상태를 그대로 통과시키는 migrate를 둔다(과제 보존).
+      migrate: (persistedState) => persistedState as ChallengeStoreState,
     },
   ),
 );

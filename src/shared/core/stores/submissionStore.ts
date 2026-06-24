@@ -25,6 +25,12 @@ export interface SubmissionPromptTurn {
   role: 'user' | 'assistant';
   /** 학생 프롬프트는 코드 첨부분을 제외한 질문만, AI 응답은 본문 텍스트. */
   text: string;
+  /**
+   * user 턴 한정 — 이 프롬프트를 **작성한 시점**의 코드 상태(템플릿 대비 변경 파일 델타).
+   * 대시보드가 연속 스냅샷을 비교해 "프롬프트가 만든 변경점(diff)"을 보여준다.
+   * assistant 턴·구버전 기록엔 없을 수 있어 선택.
+   */
+  filesAtSend?: ProjectFiles;
 }
 
 /** 저장되는 제출 1건 — 채점 결과 + 식별 정보(이름/별명) + 제출 코드·프롬프트 스냅샷. */
@@ -39,6 +45,8 @@ export interface StoredSubmission {
   submittedFiles?: ProjectFiles;
   /** 제출 시점까지의 AI 대화(프롬프트+응답). 구버전 기록엔 없을 수 있어 선택. */
   prompts?: SubmissionPromptTurn[];
+  /** 제출 시점 AI 사용량(질문 횟수·누적 토큰) — "AI를 얼마나 부렸는지" 지표. 구버전엔 없을 수 있어 선택. */
+  aiUsage?: { questionsUsed: number; tokensUsed: number };
 }
 
 interface SubmissionStoreState {

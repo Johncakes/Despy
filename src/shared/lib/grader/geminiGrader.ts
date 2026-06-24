@@ -180,10 +180,22 @@ export const geminiGrader: Grader = {
 
 function buildGradingPrompt(input: RubricGradeInput): string {
   const criteriaText = input.rubric.criteria
-    .map(
-      (criterion) =>
-        `- [${criterion.id}] ${criterion.description} (만점 ${criterion.maxScore})`,
-    )
+    .map((criterion) => {
+      const header = `- [${criterion.id}] ${criterion.description} (만점 ${criterion.maxScore})`;
+      const rationaleLine = criterion.rationale
+        ? `\n  · 배점 근거: ${criterion.rationale}`
+        : '';
+      // 레벨 anchor가 있으면 "반드시 이 점수 중 하나"로 매기고 어느 레벨인지 근거에
+      // 밝히게 한다. 정규화가 가장 가까운 레벨로 스냅하지만, 프롬프트에서부터 레벨을
+      // 고르게 해야 reason이 그 레벨에 대한 근거가 된다(점수의 타당성 확보).
+      const levelsLine =
+        criterion.levels && criterion.levels.length > 0
+          ? `\n  · 점수 레벨(아래 점수 중 하나로만 매기고, 어느 레벨에 해당하는지 근거에 밝혀라):\n${criterion.levels
+              .map((level) => `    - ${level.score}점: ${level.descriptor}`)
+              .join('\n')}`
+          : '';
+      return `${header}${rationaleLine}${levelsLine}`;
+    })
     .join('\n');
 
   // 제출 코드(와 diff)는 매 요청 무작위 구분자로 감싼다. 코드가 미리 알 수 없는

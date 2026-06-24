@@ -14,16 +14,192 @@
  */
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import styled from 'styled-components';
-import type { ChallengeProblem } from '@/shared/core/types';
-import { useSubmissionStore } from '@/shared/core/stores/submissionStore';
+import type { ChallengeProblem, ProjectFiles } from '@/shared/core/types';
+import {
+  useSubmissionStore,
+  type StoredSubmission,
+  type SubmissionPromptTurn,
+} from '@/shared/core/stores/submissionStore';
+import {
+  diffFileSets,
+  type DiffLineType,
+  type FileDiff,
+} from '@/shared/lib/utils/lineDiff';
 import { Panel } from '@/shared/components/ui/Panel';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface GradingDashboardViewProps {
   challenge: ChallengeProblem;
+}
+
+/** 풀이 타임라인 1스텝 — 학생 프롬프트 + 그에 대한 AI 응답 + 그 프롬프트가 만든 코드 변경. */
+interface TimelineStep {
+  prompt: string;
+  /** 이 프롬프트 다음에 온 AI 응답(여러 개면 합침). */
+  response: string;
+  /** 이 프롬프트 작성 시점 → 다음 프롬프트(또는 최종) 사이의 파일별 변경 diff. */
+  diffs: FileDiff[];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * 대화 트랜스크립트 + 최종 제출 파일로 "프롬프트별 코드 변경" 타임라인을 만든다.
+ * 각 user 턴의 filesAtSend(작성 시점 스냅샷)를 다음 user 턴의 스냅샷(없으면 최종
+ * 제출본)과 비교해, 그 프롬프트가 유발한 변경점을 계산한다.
+ */
+function buildTimeline(
+  prompts: SubmissionPromptTurn[],
+  finalFiles: ProjectFiles,
+): TimelineStep[] {
+  const userTurns = prompts
+    .map((turn, index) => ({ turn, index }))
+    .filter((entry) => entry.turn.role === 'user');
+
+  return userTurns.map((entry, order) => {
+    const before = entry.turn.filesAtSend ?? {};
+    const next = userTurns[order + 1];
+    const after = next ? next.turn.filesAtSend ?? {} : finalFiles;
+    // 이 프롬프트 다음 ~ 다음 프롬프트 전까지의 assistant 응답을 모은다.
+    const responseEnd = next ? next.index : prompts.length;
+    const response = prompts
+      .slice(entry.index + 1, responseEnd)
+      .filter((turn) => turn.role === 'assistant')
+      .map((turn) => turn.text)
+      .join('\n\n');
+    return { prompt: entry.turn.text, response, diffs: diffFileSets(before, after) };
+  });
+}
+
+/** 스텝 전체의 추가/삭제 라인 합계를 "+n −m" 으로. */
+function formatDiffStat(diffs: FileDiff[]): string {
+  let added = 0;
+  let removed = 0;
+  for (const fileDiff of diffs) {
+    added += fileDiff.stat.added;
+    removed += fileDiff.stat.removed;
+  }
+  return `+${added} −${removed}`;
+}
+
+function fileDiffTag(fileDiff: FileDiff): string {
+  if (fileDiff.status === 'added') return '추가';
+  if (fileDiff.status === 'removed') return '삭제';
+  return '수정';
+}
+
+function diffSign(type: DiffLineType): string {
+  if (type === 'add') return '+';
+  if (type === 'del') return '−';
+  return ' ';
+}
+
+// ── 집계(통계) ──────────────────────────────────────────────────────────────
+
+/** 제출 정렬 기준. */
+type SortKey = 'recent' | 'scoreDesc' | 'scoreAsc' | 'name';
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'recent', label: '최신순' },
+  { key: 'scoreDesc', label: '점수 높은순' },
+  { key: 'scoreAsc', label: '점수 낮은순' },
+  { key: 'name', label: '이름순' },
+];
+
+interface SubmissionStats {
+  count: number;
+  avg: number;
+  median: number;
+  max: number;
+  /** 자동 테스트 평균 통과율(0~100). */
+  avgTestRate: number;
+  /** AI 질문 수 중앙값(aiUsage 있는 제출 기준). */
+  medianQuestions: number;
+}
+
+/** 정렬된 수 배열의 중앙값(빈 배열은 0). */
+function medianOf(sorted: number[]): number {
+  if (sorted.length === 0) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function computeStats(subs: StoredSubmission[]): SubmissionStats {
+  if (subs.length === 0) {
+    return { count: 0, avg: 0, median: 0, max: 0, avgTestRate: 0, medianQuestions: 0 };
+  }
+  const scores = subs.map((s) => s.result.finalScore).sort((a, b) => a - b);
+  const sum = scores.reduce((a, b) => a + b, 0);
+  const testRate =
+    subs.reduce((acc, s) => {
+      const { passedCount, totalCount } = s.result.autoTest;
+      return acc + (totalCount > 0 ? passedCount / totalCount : 0);
+    }, 0) / subs.length;
+  const questions = subs
+    .map((s) => s.aiUsage?.questionsUsed)
+    .filter((q): q is number => typeof q === 'number')
+    .sort((a, b) => a - b);
+  return {
+    count: subs.length,
+    avg: Math.round(sum / subs.length),
+    median: Math.round(medianOf(scores)),
+    max: Math.round(Math.max(...scores)),
+    avgTestRate: Math.round(testRate * 100),
+    medianQuestions: Math.round(medianOf(questions)),
+  };
+}
+
+/** 점수 구간(히스토그램). */
+const SCORE_BUCKETS = [
+  { label: '0–59', min: 0, max: 59 },
+  { label: '60–69', min: 60, max: 69 },
+  { label: '70–79', min: 70, max: 79 },
+  { label: '80–89', min: 80, max: 89 },
+  { label: '90–100', min: 90, max: 100 },
+];
+
+function scoreHistogram(subs: StoredSubmission[]): { label: string; count: number }[] {
+  return SCORE_BUCKETS.map((bucket) => ({
+    label: bucket.label,
+    count: subs.filter((s) => {
+      const value = Math.round(s.result.finalScore);
+      return value >= bucket.min && value <= bucket.max;
+    }).length,
+  }));
+}
+
+/** 한 루브릭 항목의 제출 평균 점수(소수 1자리). 채점한 제출이 없으면 0. */
+function criterionAverage(subs: StoredSubmission[], criterionId: string): number {
+  let sum = 0;
+  let n = 0;
+  for (const s of subs) {
+    const found = s.result.rubric.scores.find((x) => x.criterionId === criterionId);
+    if (found) {
+      sum += found.score;
+      n += 1;
+    }
+  }
+  return n > 0 ? Math.round((sum / n) * 10) / 10 : 0;
+}
+
+function sortSubmissions(subs: StoredSubmission[], sortBy: SortKey): StoredSubmission[] {
+  return [...subs].sort((a, b) => {
+    switch (sortBy) {
+      case 'scoreDesc':
+        return b.result.finalScore - a.result.finalScore;
+      case 'scoreAsc':
+        return a.result.finalScore - b.result.finalScore;
+      case 'name':
+        return a.studentName.localeCompare(b.studentName);
+      case 'recent':
+      default:
+        return b.result.submittedAt - a.result.submittedAt;
+    }
+  });
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -40,9 +216,20 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
     (state) => state.submissions[challenge.id],
   );
   const submissions = storedSubmissions ?? [];
-  // 최신 제출이 위로 오도록 제출 시각 내림차순 정렬(원본 불변).
-  const sortedSubmissions = [...submissions].sort(
-    (a, b) => b.result.submittedAt - a.result.submittedAt,
+
+  // 정렬·이름 필터(집계 뷰 상호작용).
+  const [sortBy, setSortBy] = useState<SortKey>('recent');
+  const [nameQuery, setNameQuery] = useState('');
+
+  const stats = computeStats(submissions);
+  const histogram = scoreHistogram(submissions);
+  const maxBucketCount = Math.max(1, ...histogram.map((bucket) => bucket.count));
+
+  // 표시 목록 = 이름 필터 적용 후 선택 기준으로 정렬.
+  const query = nameQuery.trim().toLowerCase();
+  const displayedSubmissions = sortSubmissions(
+    query ? submissions.filter((s) => s.studentName.toLowerCase().includes(query)) : submissions,
+    sortBy,
   );
 
   // 루브릭 항목 id → 설명(제출 상세에서 점수 옆에 표시).
@@ -85,6 +272,7 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
             AI 루브릭 항목
             <CriterionHeaderHint>
               합 {maxScoreSum}점 만점 · 득점률이 {formatWeight(rubric.weights.rubric)}로 환산
+              {stats.count > 0 && ` · 제출 ${stats.count}건 평균`}
             </CriterionHeaderHint>
           </CriterionHeader>
           <CriterionList>
@@ -93,7 +281,12 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                 <CriterionDesc>
                   #{index + 1} {criterion.description || '(설명 없음)'}
                 </CriterionDesc>
-                <CriterionScore>만점 {criterion.maxScore}점</CriterionScore>
+                <CriterionScore>
+                  {stats.count > 0 && (
+                    <CriterionAvg>평균 {criterionAverage(submissions, criterion.id)}</CriterionAvg>
+                  )}
+                  만점 {criterion.maxScore}점
+                </CriterionScore>
               </CriterionRow>
             ))}
             {rubric.criteria.length === 0 && (
@@ -106,8 +299,8 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
           </AiMeta>
         </Panel>
 
-        <Panel title={`학생 제출 (${sortedSubmissions.length})`}>
-          {sortedSubmissions.length === 0 ? (
+        <Panel title={`학생 제출 (${submissions.length})`}>
+          {submissions.length === 0 ? (
             <PlaceholderBox>
               <PlaceholderTitle>아직 제출이 없습니다</PlaceholderTitle>
               <PlaceholderBody>
@@ -117,11 +310,73 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
               </PlaceholderBody>
             </PlaceholderBox>
           ) : (
-            <SubmissionList>
-              {sortedSubmissions.map((submission) => {
+            <>
+              <StatBand>
+                <StatGroup>
+                  <Stat>
+                    <StatNum>{stats.avg}</StatNum>
+                    <StatLabel>평균</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatNum>{stats.median}</StatNum>
+                    <StatLabel>중앙값</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatNum>{stats.max}</StatNum>
+                    <StatLabel>최고</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatNum>{stats.avgTestRate}%</StatNum>
+                    <StatLabel>테스트 평균</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatNum>{stats.medianQuestions}</StatNum>
+                    <StatLabel>질문 중앙값</StatLabel>
+                  </Stat>
+                </StatGroup>
+                <Histogram>
+                  {histogram.map((bucket) => (
+                    <HistoBar key={bucket.label} title={`${bucket.label}: ${bucket.count}명`}>
+                      <HistoFill
+                        style={{ height: `${(bucket.count / maxBucketCount) * 100}%` }}
+                        $empty={bucket.count === 0}
+                      />
+                      <HistoCount>{bucket.count}</HistoCount>
+                      <HistoLabel>{bucket.label}</HistoLabel>
+                    </HistoBar>
+                  ))}
+                </Histogram>
+              </StatBand>
+
+              <Controls>
+                <SortSelect
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as SortKey)}
+                  aria-label="정렬 기준"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SortSelect>
+                <SearchInput
+                  value={nameQuery}
+                  onChange={(event) => setNameQuery(event.target.value)}
+                  placeholder="이름 검색"
+                  aria-label="제출자 이름 검색"
+                />
+              </Controls>
+
+              {displayedSubmissions.length === 0 ? (
+                <MutedNote>검색 결과가 없습니다.</MutedNote>
+              ) : (
+                <SubmissionList>
+                  {displayedSubmissions.map((submission) => {
                 const prompts = submission.prompts ?? [];
-                const userTurnCount = prompts.filter((turn) => turn.role === 'user').length;
-                const codeEntries = Object.entries(submission.submittedFiles ?? {});
+                const finalFiles = submission.submittedFiles ?? {};
+                const codeEntries = Object.entries(finalFiles);
+                const timeline = buildTimeline(prompts, finalFiles);
                 return (
                   <SubmissionItem key={submission.id}>
                     <SubmissionSummary>
@@ -131,7 +386,15 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                         테스트 {submission.result.autoTest.passedCount}/
                         {submission.result.autoTest.totalCount}
                       </TestMeta>
-                      <ScoreBadge>{Math.round(submission.result.finalScore)}점</ScoreBadge>
+                      {submission.aiUsage && (
+                        <TestMeta>
+                          질문 {submission.aiUsage.questionsUsed} · 토큰{' '}
+                          {submission.aiUsage.tokensUsed.toLocaleString()}
+                        </TestMeta>
+                      )}
+                      <ScoreBadge $score={Math.round(submission.result.finalScore)}>
+                        {Math.round(submission.result.finalScore)}점
+                      </ScoreBadge>
                     </SubmissionSummary>
 
                     <Detail>
@@ -153,28 +416,55 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                       </DetailBody>
                     </Detail>
 
-                    <Detail>
-                      <DetailSummary>학생 프롬프트 ({userTurnCount})</DetailSummary>
+                    <Detail open>
+                      <DetailSummary>풀이 타임라인 — 프롬프트별 코드 변경 ({timeline.length})</DetailSummary>
                       <DetailBody>
-                        {prompts.length === 0 ? (
+                        {timeline.length === 0 ? (
                           <MutedNote>기록된 AI 대화가 없습니다.</MutedNote>
                         ) : (
-                          <Transcript>
-                            {prompts.map((turn, index) => (
-                              <Turn key={index} $role={turn.role}>
-                                <TurnRole $role={turn.role}>
-                                  {turn.role === 'user' ? '학생' : 'AI'}
-                                </TurnRole>
-                                <TurnText>{turn.text || '(빈 메시지)'}</TurnText>
-                              </Turn>
+                          <Timeline>
+                            {timeline.map((step, index) => (
+                              <Step key={index}>
+                                <StepHead>
+                                  <StepNo>#{index + 1}</StepNo>
+                                  <StepPrompt>{step.prompt || '(빈 프롬프트)'}</StepPrompt>
+                                  <StepStat>{formatDiffStat(step.diffs)}</StepStat>
+                                </StepHead>
+                                {step.response && (
+                                  <StepResponse>
+                                    <DetailSummary>AI 응답</DetailSummary>
+                                    <ResponseText>{step.response}</ResponseText>
+                                  </StepResponse>
+                                )}
+                                {step.diffs.length === 0 ? (
+                                  <MutedNote>이 프롬프트 구간에는 코드 변경이 없습니다.</MutedNote>
+                                ) : (
+                                  step.diffs.map((fileDiff) => (
+                                    <DiffFile key={fileDiff.path}>
+                                      <DiffFileHead>
+                                        <CodePath>{fileDiff.path}</CodePath>
+                                        <DiffFileTag>{fileDiffTag(fileDiff)}</DiffFileTag>
+                                      </DiffFileHead>
+                                      <DiffPre>
+                                        {fileDiff.lines.map((line, lineIndex) => (
+                                          <DiffLineRow key={lineIndex} $type={line.type}>
+                                            <DiffSign>{diffSign(line.type)}</DiffSign>
+                                            <DiffText>{line.text}</DiffText>
+                                          </DiffLineRow>
+                                        ))}
+                                      </DiffPre>
+                                    </DiffFile>
+                                  ))
+                                )}
+                              </Step>
                             ))}
-                          </Transcript>
+                          </Timeline>
                         )}
                       </DetailBody>
                     </Detail>
 
                     <Detail>
-                      <DetailSummary>제출 코드 ({codeEntries.length}개 파일)</DetailSummary>
+                      <DetailSummary>최종 제출 코드 ({codeEntries.length}개 파일)</DetailSummary>
                       <DetailBody>
                         {codeEntries.length === 0 ? (
                           <MutedNote>템플릿 대비 변경된 파일이 없습니다.</MutedNote>
@@ -191,7 +481,9 @@ export function GradingDashboardView({ challenge }: GradingDashboardViewProps) {
                   </SubmissionItem>
                 );
               })}
-            </SubmissionList>
+                </SubmissionList>
+              )}
+            </>
           )}
         </Panel>
       </Grid>
@@ -344,16 +636,132 @@ const CriterionDesc = styled.span`
 `;
 
 const CriterionScore = styled.span`
+  display: inline-flex;
+  align-items: baseline;
+  gap: ${({ theme }) => theme.spacing.sm};
   font-size: ${({ theme }) => theme.font.sizeSm};
   font-weight: ${({ theme }) => theme.font.weightBold};
   color: ${({ theme }) => theme.colors.primary};
   white-space: nowrap;
 `;
 
+// 항목별 제출 평균 — 만점 옆에 무채색으로(어느 기준에서 막혔는지 한눈에).
+const CriterionAvg = styled.span`
+  font-weight: 400;
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
 const AiMeta = styled.p`
   margin: ${({ theme }) => theme.spacing.md} 0 0;
   font-size: ${({ theme }) => theme.font.sizeXs};
   color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// ── 집계 band / 정렬·필터 컨트롤 ─────────────────────────────────────────────
+
+const StatBand = styled.div`
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.md};
+  flex-wrap: wrap;
+  padding: ${({ theme }) => theme.spacing.md};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.colors.surfaceAlt};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+`;
+
+const StatGroup = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.lg};
+`;
+
+const Stat = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const StatNum = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeLg};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const StatLabel = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+// 점수 분포 히스토그램 — 구간별 막대.
+const Histogram = styled.div`
+  display: flex;
+  align-items: flex-end;
+  gap: ${({ theme }) => theme.spacing.xs};
+  height: 64px;
+`;
+
+const HistoBar = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 34px;
+  height: 100%;
+`;
+
+const HistoFill = styled.div<{ $empty: boolean }>`
+  width: 100%;
+  min-height: ${({ $empty }) => ($empty ? '0' : '3px')};
+  background: ${({ theme, $empty }) =>
+    $empty ? 'transparent' : theme.colors.primary};
+  border-radius: 2px;
+`;
+
+const HistoCount = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const HistoLabel = styled.span`
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const Controls = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+`;
+
+const SortSelect = styled.select`
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-family: inherit;
+  color: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  min-width: 0;
+  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-family: inherit;
+  color: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.sm};
+
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
 `;
 
 const PlaceholderBox = styled.div`
@@ -430,10 +838,16 @@ const TestMeta = styled.span`
   white-space: nowrap;
 `;
 
-const ScoreBadge = styled.span`
+// 점수대별 색으로 한눈에 구분: 80↑ 강조(primary) · 60–79 주의(warning) · 60 미만 위험(danger).
+const ScoreBadge = styled.span<{ $score: number }>`
   font-size: ${({ theme }) => theme.font.sizeSm};
   font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme }) => theme.colors.primary};
+  color: ${({ theme, $score }) =>
+    $score >= 80
+      ? theme.colors.primary
+      : $score >= 60
+        ? theme.colors.warning
+        : theme.colors.danger};
   white-space: nowrap;
 `;
 
@@ -495,37 +909,116 @@ const MutedNote = styled.p`
   color: ${({ theme }) => theme.colors.textMuted};
 `;
 
-// 대화 트랜스크립트 — 학생/AI 턴을 세로로 쌓고 역할(좌측 색 바)로 구분.
-const Transcript = styled.div`
+// 풀이 타임라인 — 프롬프트(스텝)를 세로로 쌓는다.
+const Timeline = styled.div`
   display: flex;
   flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
+const Step = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding-left: ${({ theme }) => theme.spacing.sm};
+  border-left: 3px solid ${({ theme }) => theme.colors.primary};
+`;
+
+const StepHead = styled.div`
+  display: flex;
+  align-items: baseline;
   gap: ${({ theme }) => theme.spacing.sm};
 `;
 
-const Turn = styled.div<{ $role: 'user' | 'assistant' }>`
+const StepNo = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  white-space: nowrap;
+`;
+
+const StepPrompt = styled.span`
+  flex: 1;
+  min-width: 0;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.text};
+  white-space: pre-wrap;
+  word-break: break-word;
+`;
+
+const StepStat = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: nowrap;
+`;
+
+const StepResponse = styled.details`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const ResponseText = styled.div`
+  margin-top: ${({ theme }) => theme.spacing.xs};
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  line-height: 1.6;
+  color: ${({ theme }) => theme.colors.textMuted};
+  white-space: pre-wrap;
+  word-break: break-word;
+`;
+
+const DiffFile = styled.div`
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: ${({ theme }) => `${theme.spacing.xs} ${theme.spacing.sm}`};
+`;
+
+const DiffFileHead = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const DiffFileTag = styled.span`
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const DiffPre = styled.div`
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radius.sm};
   background: ${({ theme }) => theme.colors.surface};
-  border-left: 3px solid
-    ${({ theme, $role }) =>
-      $role === 'user' ? theme.colors.primary : theme.colors.border};
-`;
-
-const TurnRole = styled.span<{ $role: 'user' | 'assistant' }>`
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: ${({ theme }) => theme.font.sizeXs};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  color: ${({ theme, $role }) =>
-    $role === 'user' ? theme.colors.primary : theme.colors.textMuted};
+  line-height: 1.5;
 `;
 
-const TurnText = styled.div`
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  line-height: 1.6;
-  color: ${({ theme }) => theme.colors.text};
-  white-space: pre-wrap;
+// diff 한 줄 — 추가(초록)/삭제(빨강)/유지(기본) 배경. 좌측 부호 거터.
+const DiffLineRow = styled.div<{ $type: DiffLineType }>`
+  display: flex;
+  white-space: pre;
+  background: ${({ $type }) =>
+    $type === 'add'
+      ? 'rgba(80, 200, 120, 0.12)'
+      : $type === 'del'
+        ? 'rgba(255, 91, 110, 0.12)'
+        : 'transparent'};
+  color: ${({ theme, $type }) =>
+    $type === 'context' ? theme.colors.textMuted : theme.colors.text};
+`;
+
+const DiffSign = styled.span`
+  flex: 0 0 1.4em;
+  text-align: center;
+  user-select: none;
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const DiffText = styled.span`
+  flex: 1;
+  padding-right: ${({ theme }) => theme.spacing.sm};
   word-break: break-word;
 `;
 

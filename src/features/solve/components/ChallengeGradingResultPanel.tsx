@@ -163,6 +163,11 @@ export function ChallengeGradingResultPanel({
           <CriterionList>
             {rubric.scores.map((score) => {
               const criterion = criteria.find((item) => item.id === score.criterionId);
+              // 점수가 레벨로 스냅됐다면 어느 레벨에 도달했는지 서술자를 함께 보여줘
+              // 점수의 근거를 명확히 한다(레벨 점수와 일치하는 항목을 찾는다).
+              const reachedLevel = criterion?.levels?.find(
+                (level) => level.score === score.score,
+              );
               return (
                 <CriterionItem key={score.criterionId}>
                   <CriterionHeader>
@@ -173,7 +178,13 @@ export function ChallengeGradingResultPanel({
                       {score.score}/{criterion?.maxScore ?? 0}
                     </CriterionScore>
                   </CriterionHeader>
+                  {reachedLevel && (
+                    <CriterionLevel>도달 레벨 · {reachedLevel.descriptor}</CriterionLevel>
+                  )}
                   <CriterionReason>{score.reason}</CriterionReason>
+                  {criterion?.rationale && (
+                    <CriterionRationale>배점 근거 · {criterion.rationale}</CriterionRationale>
+                  )}
                 </CriterionItem>
               );
             })}
@@ -397,9 +408,24 @@ const CriterionScore = styled.span`
   color: ${({ theme }) => theme.colors.primary};
 `;
 
+const CriterionLevel = styled.p`
+  margin: ${({ theme }) => `${theme.spacing.xs} 0 0`};
+  font-size: ${({ theme }) => theme.font.sizeXs};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  color: ${({ theme }) => theme.colors.primary};
+  word-break: break-word;
+`;
+
 const CriterionReason = styled.p`
   margin: ${({ theme }) => `${theme.spacing.xs} 0 0`};
   font-size: ${({ theme }) => theme.font.sizeSm};
+  color: ${({ theme }) => theme.colors.textMuted};
+  word-break: break-word;
+`;
+
+const CriterionRationale = styled.p`
+  margin: ${({ theme }) => `${theme.spacing.xs} 0 0`};
+  font-size: ${({ theme }) => theme.font.sizeXs};
   color: ${({ theme }) => theme.colors.textMuted};
   word-break: break-word;
 `;

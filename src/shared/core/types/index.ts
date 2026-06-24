@@ -33,6 +33,18 @@ export type ProjectFiles = Record<string, string>;
 // (docs/spec-webcontainer.md §4)
 
 /**
+ * 채점 레벨 anchor. 한 루브릭 항목 안에서 "이 점수를 받는 조건"을 못박는 서술자다.
+ * 정의되면 AI 점수는 이 레벨 값 중 하나로 스냅되어(score.ts), 레벨 서술자가 곧
+ * 점수의 근거가 된다(점수 6과 7을 가르는 즉흥적 경계 대신 정의된 기준으로 채점).
+ */
+export interface RubricLevel {
+  /** 이 레벨에서 부여하는 점수(0 ~ 항목 만점) */
+  score: number;
+  /** 이 점수를 받는 조건 서술자(예: "모든 예외를 처리") */
+  descriptor: string;
+}
+
+/**
  * 채점 루브릭 항목. AI 정성 채점의 단위 기준이다(예: "장바구니가 비었을 때 예외 처리").
  */
 export interface RubricCriterion {
@@ -41,6 +53,13 @@ export interface RubricCriterion {
   description: string;
   /** 이 항목 만점 */
   maxScore: number;
+  /**
+   * 점수 레벨 anchor(선택). 정의되면 AI는 이 레벨 중 하나를 골라야 하고, 정규화가
+   * 점수를 가장 가까운 레벨로 스냅한다. 비면 기존대로 [0, maxScore] 자유 점수.
+   */
+  levels?: RubricLevel[];
+  /** 배점·기준 근거 메모(선택). 왜 이 배점·기준인지에 대한 출제자 정당화. */
+  rationale?: string;
 }
 
 /**

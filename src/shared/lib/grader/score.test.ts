@@ -63,6 +63,62 @@ describe('normalizeRubricResult', () => {
   });
 });
 
+// 레벨 anchor: AI 점수를 정의된 레벨 값으로 스냅해 점수의 근거를 명확히 하는지 검증한다.
+describe('normalizeRubricResult — 레벨 anchor 스냅', () => {
+  const leveledRubric: GradingRubric = {
+    criteria: [
+      {
+        id: 'c1',
+        description: '예외 처리',
+        maxScore: 10,
+        levels: [
+          { score: 10, descriptor: '모든 예외' },
+          { score: 6, descriptor: '주요 케이스만' },
+          { score: 0, descriptor: '없음' },
+        ],
+      },
+    ],
+    weights: { tests: 0.5, rubric: 0.5 },
+  };
+
+  it('LLM 점수를 가장 가까운 레벨로 스냅한다', () => {
+    const result = normalizeRubricResult(
+      { scores: [{ criterionId: 'c1', score: 7, reason: '대부분' }], feedback: '' },
+      leveledRubric,
+    );
+    expect(result.scores[0].score).toBe(6); // 7 → 가장 가까운 레벨 6
+  });
+
+  it('거리가 같으면 더 낮은 레벨로 스냅한다(보수적)', () => {
+    const result = normalizeRubricResult(
+      { scores: [{ criterionId: 'c1', score: 8, reason: '경계' }], feedback: '' },
+      leveledRubric,
+    );
+    // 8은 6(거리 2)과 10(거리 2)이 동률 → 더 낮은 6으로 스냅
+    expect(result.scores[0].score).toBe(6);
+  });
+
+  it('만점 초과 LLM 점수도 만점 레벨로 스냅한다(클램프 후 스냅)', () => {
+    const result = normalizeRubricResult(
+      { scores: [{ criterionId: 'c1', score: 99, reason: '초과' }], feedback: '' },
+      leveledRubric,
+    );
+    expect(result.scores[0].score).toBe(10);
+  });
+
+  it('레벨이 비어 있으면 기존처럼 클램프만 한다', () => {
+    const noLevelRubric: GradingRubric = {
+      criteria: [{ id: 'c1', description: 'x', maxScore: 10, levels: [] }],
+      weights: { tests: 0.5, rubric: 0.5 },
+    };
+    const result = normalizeRubricResult(
+      { scores: [{ criterionId: 'c1', score: 7, reason: '' }], feedback: '' },
+      noLevelRubric,
+    );
+    expect(result.scores[0].score).toBe(7); // 레벨 없음 → 스냅 안 함
+  });
+});
+
 describe('computeFinalScore', () => {
   const fullRubric = normalizeRubricResult(
     {

@@ -63,6 +63,13 @@ export const SAMPLE_CHALLENGES: ChallengeProblem[] = [
           id: 'code-quality',
           description: '상태 관리가 단순하고 불필요한 중복이 없다.',
           maxScore: 15,
+          rationale: '동작은 테스트로 검증되므로, 루브릭은 유지보수성에 배점한다.',
+          // 점수 레벨 anchor 예시 — AI 점수가 아래 값 중 하나로 스냅된다(채점 근거 명확화).
+          levels: [
+            { score: 15, descriptor: '상태가 최소이고 파생값을 중복 없이 계산한다.' },
+            { score: 8, descriptor: '동작하나 불필요한 상태·중복이 일부 있다.' },
+            { score: 0, descriptor: '상태 관리가 장황하거나 중복이 많다.' },
+          ],
         },
       ],
       // testFiles가 아직 비어 있으므로 초기엔 루브릭 비중을 높게 둔다(P2에서 재조정).

@@ -181,10 +181,25 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
 
   // 제출 시 기록할 AI 대화 트랜스크립트를 ref에 보관한다(스트리밍 중 자주 갱신되므로
   // state 대신 ref로 받아 재렌더를 피한다 — 제출 시점에만 읽으면 충분).
+  // 각 user 턴에는 그 프롬프트를 **작성한 시점**의 코드 스냅샷(변경 델타)을 부착한다:
+  // transcript는 매 청크마다 새로 오므로, 기존 user 턴의 스냅샷은 보존하고(처음 전송 때 찍힘)
+  // 새로 생긴 user 턴에만 지금 코드 상태를 찍는다. 대시보드가 연속 스냅샷으로 diff를 만든다.
   const promptsRef = useRef<SubmissionPromptTurn[]>([]);
-  const handleMessagesChange = useCallback((transcript: SubmissionPromptTurn[]) => {
-    promptsRef.current = transcript;
-  }, []);
+  const handleMessagesChange = useCallback(
+    (transcript: SubmissionPromptTurn[]) => {
+      const prev = promptsRef.current;
+      promptsRef.current = transcript.map((turn, index) => {
+        if (turn.role !== 'user') return turn;
+        const before = prev[index];
+        const filesAtSend =
+          before?.role === 'user' && before.filesAtSend
+            ? before.filesAtSend // 이미 전송 시점에 찍어둔 스냅샷 유지
+            : collectChangedFiles(filesRef.current, challenge.template, challenge.lockedPaths);
+        return { ...turn, filesAtSend };
+      });
+    },
+    [challenge.template, challenge.lockedPaths],
+  );
 
   // 질문에 첨부할 현재 코드 상태 — 지금 에디터에 열린 활성 파일의 경로+내용을 보낸다.
   // 전송 시점에 호출되므로 최신 버퍼를 ref로 읽어 콜백 재생성을 피한다.
@@ -224,12 +239,13 @@ export function ChallengeSolveView({ challenge }: { challenge: ChallengeProblem 
         // 제출 시점의 코드(변경분)와 AI 대화를 함께 저장 → 대시보드에서 열람.
         submittedFiles,
         prompts: promptsRef.current,
+        aiUsage: { questionsUsed, tokensUsed },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setSubmitError(message);
     }
-  }, [testResult, runTests, files, challenge, grade, studentName]);
+  }, [testResult, runTests, files, challenge, grade, studentName, questionsUsed, tokensUsed]);
 
   // 워크스페이스가 준비되어야(테스트 실행 가능) 제출할 수 있다.
   const isSubmitting = grade.isPending;

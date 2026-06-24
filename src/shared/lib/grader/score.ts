@@ -15,6 +15,7 @@ import type {
   GradingResult,
   GradingRubric,
   RubricGradingResult,
+  RubricLevel,
   TestCase,
   TestCaseResult,
   TestCaseStatus,
@@ -55,9 +56,16 @@ export function normalizeRubricResult(
     const found = raw.scores.find((item) => item.criterionId === criterion.id);
     const rawScore = found?.score ?? 0;
     const clamped = clamp(rawScore, 0, criterion.maxScore);
+    // 레벨 anchor가 정의된 항목은 LLM 점수를 가장 가까운 레벨로 스냅한다. 점수가
+    // 항상 출제자가 정의한 레벨 값이 되어, 그 레벨 서술자가 점수의 근거가 된다
+    // (6과 7을 가르는 즉흥적 경계를 없애 일관·방어 가능한 채점으로 만든다).
+    const score =
+      criterion.levels && criterion.levels.length > 0
+        ? snapToNearestLevel(clamped, criterion.levels, criterion.maxScore)
+        : clamped;
     return {
       criterionId: criterion.id,
-      score: clamped,
+      score,
       reason: found?.reason ?? '(채점 근거 없음)',
     };
   });
@@ -136,6 +144,32 @@ export function computeFinalScore(
 function clamp(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) return min;
   return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * 점수를 가장 가까운 레벨 값으로 스냅한다(레벨 anchor 채점). 거리가 같으면 더
+ * 낮은 레벨로 내려 보수적으로 판정한다. 레벨 값 자체도 [0, maxScore]로 클램프해
+ * 출제 오입력(범위 밖 레벨)을 방어한다. levels는 호출부가 비어 있지 않음을 보장한다.
+ */
+function snapToNearestLevel(
+  score: number,
+  levels: RubricLevel[],
+  maxScore: number,
+): number {
+  let bestScore = clamp(levels[0].score, 0, maxScore);
+  let bestDistance = Math.abs(score - bestScore);
+  for (const level of levels) {
+    const candidate = clamp(level.score, 0, maxScore);
+    const distance = Math.abs(score - candidate);
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance && candidate < bestScore)
+    ) {
+      bestScore = candidate;
+      bestDistance = distance;
+    }
+  }
+  return bestScore;
 }
 
 const VALID_STATUSES: readonly TestCaseStatus[] = [
