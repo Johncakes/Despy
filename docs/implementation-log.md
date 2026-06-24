@@ -267,7 +267,8 @@ src/
 - ✅ 채점 대시보드 — `GradingDashboardView` + 라우트
   `/author/challenge/[challengeId]/submissions`(출제 편집 패널의 '채점 현황 →' 링크로 진입).
   루브릭·AI정책 요약 + **학생 제출 목록**(이름·시각·점수, 최신순 / 펼치면 루브릭 항목별 점수·피드백 +
-  **학생 프롬프트**(AI 대화 트랜스크립트) + **제출 코드**(변경 파일별 코드블록))을 표시한다. 데이터
+  **학생 프롬프트**(AI 대화 트랜스크립트) + **제출 코드**(변경 파일별 코드블록))을 표시한다.
+  (↳ 인라인 `<details>` 펼침 방식은 **2026-06-25 모달 마스터-디테일로 개편** — 아래 별도 항목 참조.) 데이터
   소스는 신규 `submissionStore`(`despy-submissions`, localStorage) — 학생이 제출해 채점 성공 시
   `ChallengeSolveView`가 결과·이름·`submittedFiles`·`prompts`를 함께 저장한다(②→③ 고리 연결).
   프롬프트는 `AiChatPanel.onMessagesChange`(선택 prop, 비파괴적)로 트랜스크립트를 부모 ref에 모아 캡처.
@@ -282,6 +283,23 @@ src/
     연속 비교해 "그 프롬프트가 만든 변경점"을 GitHub식 +/− 로 보여준다(`shared/lib/utils/lineDiff.ts` LCS).
     검증: lineDiff 단위테스트 + headless 종합 실측 17/17 PASS(집계·히스토그램·정렬·AI사용량·루브릭평균·
     프롬프트별 diff(OLD→NEW)).
+  - ✅ **대시보드 UI 개편 — 모달 마스터-디테일 (2026-06-25)**: 좌우 1:1 그리드 안에 모든 상세를
+    인라인 `<details>`로 펼쳐 비좁고 비교가 어렵던 구조를 **"목록은 비교, 상세는 큰 모달"** 로 분리.
+    ① **신규 `Modal` 공용 UI 프리미티브**(`shared/components/ui/Modal.tsx`) — 중앙 오버레이, ESC·배경
+       클릭 닫기, 열린 동안 body 스크롤 잠금, `createPortal`(body), 크기 `md`/`lg`/`full`, 닫기는
+       `onClose`로 주입(DI — feature 비의존). ② 대시보드는 **단일 컬럼** — 상단 큰 **집계 band**
+       (통계 숫자 32px) + 히스토그램, 그 아래 **컴팩트 제출 비교표**(이름·제출시각·테스트·질문·토큰·점수,
+       수치 우측정렬·행 hover/포커스·Enter/Space 클릭). ③ **채점 기준**(점수 모델·루브릭·AI정책)은
+       헤더 `[채점 기준 보기]` 버튼의 `size="md"` 모달로 분리, 목록 화면엔 공식 한 줄만 인라인.
+       ④ **행 클릭 → `size="full"` 상세 모달** — 탭(`루브릭` / `대화` / `풀이 타임라인` / `제출 코드`)으로
+       한 번에 하나만 넓게. 헤더에 점수 배지·제출시각·테스트·AI사용량 메타. 데이터 모델·store·persist·
+       레이어 규칙 변경 **없음**(표시 계층만 재구성).
+  - ✅ **'대화' 탭 + AI 응답 정리 (2026-06-25)**: 평가 핵심인 "AI를 어떻게 부렸나"를 위해 학생↔AI
+    **트랜스크립트**를 채팅으로(학생 = primary 강조 말풍선·원문 보존, AI = `Markdown` 렌더). AI 응답에
+    그대로 노출되던 `<<<<<<< SEARCH … >>>>>>> REPLACE` 마커·중복 원본은 **`AiMessageBody`** 가
+    설명(prose, Markdown) + 파일별 **"교체 제안" 카드**(파일경로 + 교체될 새 코드, *교체 전 코드는 접기*)로
+    정리 — 기존 `markdownCode.parseSearchReplaceEdits` 재사용, SEARCH/REPLACE 없는 응답은 그대로 Markdown.
+    탭 라벨 `대화 (n)` 의 n = 학생 질문(user 턴) 수. typecheck·lint 통과.
 - ✅ `despy-workspace` Zustand persist (IndexedDB + delta, §9.1) — in-memory 버퍼·AI 사용량 대체.
   `idbStorage`(네이티브 어댑터) + `workspaceStore`(델타) + `useWorkspace`(복원/저장·hasHydrated 게이트)
   + `ChallengeSolveView`(AI 사용량 영속화). headless Chrome로 편집→IDB 저장→새로고침 복원 실측 PASS.

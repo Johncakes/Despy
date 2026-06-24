@@ -141,6 +141,21 @@ export interface UseWorkspaceResult {
    */
   sendApiRequest: (request: ApiConsoleRequest) => Promise<ApiConsoleResponse>;
 
+  // ── 백엔드 실시간 모니터 ──
+  /**
+   * 백엔드가 처리한 요청/응답 실시간 로그(누적, 최대 MAX_API_LOG_ENTRIES개).
+   * 잠긴 서버 진입점의 로깅 미들웨어 출력을 dev 스트림에서 파싱해 채운다. 백엔드가
+   * 없으면 항상 빈 배열.
+   */
+  apiLogs: ApiLogEntry[];
+  /** API 로그를 모두 비운다. */
+  clearApiLogs: () => void;
+  /**
+   * 백엔드 저장소(db.json) 현재 상태 — 파일 백업 db를 쓰는 템플릿에서 fs.watch로 실시간
+   * 갱신된다(파싱된 JSON). 파일이 없거나 DB 미지원 템플릿이면 null. (apiConsole.dbFilePath)
+   */
+  dbState: unknown;
+
   // ── AI 사용량 (영속, P4) ──
   /** 지금까지 보낸 AI 질문 횟수(challengeId 없으면 0) */
   questionsUsed: number;
@@ -160,6 +175,17 @@ const WORKSPACE_PERSIST_DEBOUNCE_MS = 400;
 
 /** 브라우저 콘솔에 보관하는 최대 항목 수 — 무한 누적(메모리)을 막고 최근 것만 유지. */
 const MAX_CONSOLE_ENTRIES = 500;
+
+/** API 로그에 보관하는 최대 항목 수(무한 누적 방지, 최근 것만 유지). */
+const MAX_API_LOG_ENTRIES = 500;
+
+/**
+ * 백엔드 로깅 미들웨어가 요청 1건을 stdout에 출력할 때 JSON을 감싸는 센티넬.
+ * dev 출력 스트림에서 이 사이의 JSON만 골라 구조화 로그로 만든다(나머지는 콘솔 텍스트).
+ * 서버 템플릿(server/index.js·src/server.js)의 despyRequestLogger와 문자열이 일치해야 한다.
+ */
+const API_LOG_PREFIX = '__DESPY_LOG__';
+const API_LOG_SUFFIX = '__DESPY_LOG_END__';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -189,13 +215,24 @@ const BACKEND_API_PORT = 3000;
  * persist 스키마 변경을 피하려고 템플릿 내용으로만 추론한다(inferPreviewPort와 동일 원칙).
  */
 function inferApiConsoleConfig(template: ProjectFiles): ApiConsoleConfig | null {
-  const hasBackend = 'server/index.js' in template || 'src/server.js' in template;
-  if (!hasBackend) return null;
+  const isFullstack = 'server/index.js' in template;
+  const isExpressOnly = 'src/server.js' in template;
+  if (!isFullstack && !isExpressOnly) return null;
   const hasFrontend = 'index.html' in template;
+  // 파일 백업 db(server/db.js·src/db.js)를 쓰는 템플릿만 DB 상태 뷰를 노출한다.
+  // 저장소 파일 경로는 서버 진입점이 쓰는 위치(server/data·src/data)와 일치해야 한다.
+  const dbFilePath = isFullstack
+    ? 'server/db.js' in template
+      ? 'server/data/db.json'
+      : undefined
+    : 'src/db.js' in template
+      ? 'src/data/db.json'
+      : undefined;
   return {
     port: BACKEND_API_PORT,
     defaultPath: hasFrontend ? '/api/todos' : '/todos',
     isPrimaryView: !hasFrontend,
+    dbFilePath,
   };
 }
 
@@ -277,6 +314,15 @@ export function useWorkspace(
   const [consoleEntries, setConsoleEntries] = useState<BrowserConsoleEntry[]>([]);
   const clearConsole = useCallback(() => setConsoleEntries([]), []);
 
+  // 백엔드 실시간 모니터 — API 로그(요청/응답) + DB 상태(db.json watch).
+  const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
+  const clearApiLogs = useCallback(() => setApiLogs([]), []);
+  const [dbState, setDbState] = useState<unknown>(null);
+  // dev 출력에서 API 로그 센티넬을 추출할 때 청크 경계에 걸친 조각을 모으는 버퍼.
+  const devLogBufferRef = useRef('');
+  // API 로그 항목에 부여하는 단조 증가 id(렌더 key).
+  const apiLogIdRef = useRef(0);
+
   const lockedSet = useMemo(() => new Set(lockedPaths), [lockedPaths]);
   const isPathLocked = useCallback((path: string) => lockedSet.has(path), [lockedSet]);
 
@@ -301,6 +347,48 @@ export function useWorkspace(
   const appendLog = useCallback((chunk: string) => {
     setLogs((prev) => [...prev, chunk]);
   }, []);
+
+  // dev 서버 출력을 받아 API 로그 센티넬(__DESPY_LOG__…__DESPY_LOG_END__)을 구조화 로그로
+  // 분리하고, 나머지 텍스트는 콘솔(appendLog)로 흘린다. 청크가 센티넬 중간에서 잘릴 수 있어
+  // 미완 조각은 버퍼에 남겨 다음 청크와 합친다(concurrently의 [api] 프리픽스·ANSI는 센티넬
+  // 밖이라 콘솔로 흘러가고 JSON 파싱에 영향 없다).
+  const handleDevOutput = useCallback(
+    (chunk: string) => {
+      let buffer = devLogBufferRef.current + chunk;
+      let plain = '';
+      for (;;) {
+        const start = buffer.indexOf(API_LOG_PREFIX);
+        if (start === -1) {
+          plain += buffer;
+          buffer = '';
+          break;
+        }
+        plain += buffer.slice(0, start);
+        const end = buffer.indexOf(API_LOG_SUFFIX, start);
+        if (end === -1) {
+          buffer = buffer.slice(start); // 미완 — 다음 청크를 기다린다
+          break;
+        }
+        const json = buffer.slice(start + API_LOG_PREFIX.length, end);
+        buffer = buffer.slice(end + API_LOG_SUFFIX.length);
+        try {
+          const parsed = JSON.parse(json) as Omit<ApiLogEntry, 'id'>;
+          const entry: ApiLogEntry = { ...parsed, id: (apiLogIdRef.current += 1) };
+          setApiLogs((prev) => {
+            const next = [...prev, entry];
+            return next.length > MAX_API_LOG_ENTRIES
+              ? next.slice(next.length - MAX_API_LOG_ENTRIES)
+              : next;
+          });
+        } catch {
+          /* 깨진 로그 줄은 무시 */
+        }
+      }
+      devLogBufferRef.current = buffer;
+      if (plain) appendLog(plain);
+    },
+    [appendLog],
+  );
 
   // 현재 파일 버퍼를 ref로 미러링해, debounce 후 영속 시점에 최신 델타를 계산한다.
   useEffect(() => {
@@ -560,7 +648,7 @@ export function useWorkspace(
       // 풀스택 템플릿은 프론트·백 두 포트가 server-ready를 내므로 프론트 포트만 골라
       // 미리보기를 확정한다(단일 서버 템플릿은 previewPort=undefined → 첫 이벤트로 확정).
       const { url } = await startDevServer('npm', ['run', 'dev'], {
-        onOutput: appendLog,
+        onOutput: handleDevOutput,
         previewPort: inferPreviewPort(template),
       });
 
@@ -573,7 +661,7 @@ export function useWorkspace(
       setPhase('error');
       logger.error('[useWorkspace] 워크스페이스 시작 실패', error);
     }
-  }, [template, challengeId, appendLog]);
+  }, [template, challengeId, appendLog, handleDevOutput]);
 
   useEffect(() => {
     if (hasStartedRef.current) return;
@@ -586,6 +674,37 @@ export function useWorkspace(
     hasStartedRef.current = true;
     queueMicrotask(() => void start());
   }, [start, challengeId, hasHydrated]);
+
+  // DB 상태 라이브 뷰 — 워크스페이스 준비 후 db.json을 watch해 변경 시 dbState를 갱신한다.
+  // 파일 백업 db를 쓰는 백엔드 템플릿(apiConsole.dbFilePath)에서만 동작한다.
+  useEffect(() => {
+    const dbFilePath = apiConsole?.dbFilePath;
+    if (phase !== 'ready' || !dbFilePath) return;
+
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+
+    void watchContainerFile(dbFilePath, (content) => {
+      if (cancelled) return;
+      if (content === null) {
+        setDbState(null);
+        return;
+      }
+      try {
+        setDbState(JSON.parse(content));
+      } catch {
+        setDbState(null);
+      }
+    }).then((unsub) => {
+      if (cancelled) unsub();
+      else unsubscribe = unsub;
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [phase, apiConsole]);
 
   // 언마운트 시 대기 중인 FS 쓰기 정리 + 보류된 파일 델타 영속을 즉시 반영(이탈 시
   // 마지막 편집 보존). debounce 타이머가 떠 있으면 취소하고 한 번 flush한다.
@@ -628,6 +747,9 @@ export function useWorkspace(
     clearConsole,
     apiConsole,
     sendApiRequest,
+    apiLogs,
+    clearApiLogs,
+    dbState,
     questionsUsed,
     tokensUsed,
     recordAiTurn,
