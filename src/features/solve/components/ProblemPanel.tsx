@@ -11,16 +11,29 @@
 import styled from 'styled-components';
 import type { Problem } from '@/shared/core/types';
 import { Panel } from '@/shared/components/ui/Panel';
+import { Button } from '@/shared/components/ui/Button';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Markdown } from '@/shared/components/ui/Markdown';
 
 // ── Component ─────────────────────────────────────────────────────────────
 
-export function ProblemPanel({ problem }: { problem: Problem }) {
+export function ProblemPanel({ problem, isOpen = true, onToggle }: { problem: Problem, isOpen?: boolean, onToggle?: () => void }) {
   const publicCases = problem.testCases.filter((testCase) => testCase.isPublic);
 
+  if (!isOpen && onToggle) {
+    return (
+      <CollapsedBar type="button" onClick={onToggle} aria-label="요구사항 열기">
+        <CollapsedText>요구사항</CollapsedText>
+      </CollapsedBar>
+    );
+  }
+
   return (
-    <Panel title={problem.title}>
+    <Panel 
+      title="요구사항"
+      actions={onToggle && <Button variant="ghost" onClick={onToggle}>닫기</Button>}
+      className="full-height"
+    >
       <Meta>
         <Badge tone="info">시간 제한 {problem.timeLimitSec}s</Badge>
         <Badge tone="info">메모리 제한 {problem.memoryLimitMb}MB</Badge>
@@ -64,6 +77,30 @@ export function ProblemPanel({ problem }: { problem: Problem }) {
 }
 
 // ── Styled Components ─────────────────────────────────────────────────────
+
+const CollapsedBar = styled.button`
+  width: 44px;
+  height: 100%;
+  background: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radius.md};
+  color: ${({ theme }) => theme.colors.text};
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.surfaceAlt};
+  }
+`;
+
+const CollapsedText = styled.span`
+  writing-mode: vertical-rl;
+  font-size: ${({ theme }) => theme.font.sizeSm};
+  font-weight: ${({ theme }) => theme.font.weightBold};
+  letter-spacing: 2px;
+`;
 
 const Meta = styled.div`
   display: flex;

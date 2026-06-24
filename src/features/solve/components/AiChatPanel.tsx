@@ -1,5 +1,5 @@
 /**
- * AiChatPanel.tsx — 제한된 AI 도우미 패널
+ * AiChatPanel.tsx — 제한된 AI 에이전트 패널
  *
  * 교수 정책(모델 고정·질문/토큰 한도·시스템 프롬프트) 아래에서만 동작하는 AI
  * 채팅. useChat로 /api/agent에 스트리밍 요청하고, 응답 종료 시 토큰 사용량을
@@ -66,8 +66,7 @@ interface AiChatPanelProps {
   aiPolicy: AiPolicy;
   questionsUsed: number;
   tokensUsed: number;
-  isOpen: boolean;
-  onToggle: () => void;
+
   /** 응답 1턴 완료 시 호출 (질문 +1, 토큰 누적) */
   onTurnComplete: (totalTokens: number) => void;
   /** AI가 에디터를 직접 편집할지 여부 */
@@ -131,8 +130,7 @@ export function AiChatPanel({
   aiPolicy,
   questionsUsed,
   tokensUsed,
-  isOpen,
-  onToggle,
+
   onTurnComplete,
   isDirectEditEnabled,
   onToggleDirectEdit,
@@ -234,24 +232,13 @@ export function AiChatPanel({
     }
   };
 
-  if (!isOpen) {
-    return (
-      <CollapsedBar type="button" onClick={onToggle} aria-label="AI 도우미 열기">
-        <CollapsedText>AI 도우미</CollapsedText>
-      </CollapsedBar>
-    );
-  }
-
   return (
     <Container>
       <Header>
         <HeaderTitle>
-          AI 도우미
+          AI 에이전트
           <Badge tone="info">{policy.model}</Badge>
         </HeaderTitle>
-        <Button variant="ghost" onClick={onToggle}>
-          닫기
-        </Button>
       </Header>
 
       <Controls>
@@ -351,29 +338,7 @@ const Container = styled.aside`
   overflow: hidden;
 `;
 
-const CollapsedBar = styled.button`
-  width: 44px;
-  height: 100%;
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radius.md};
-  color: ${({ theme }) => theme.colors.text};
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 
-  &:hover {
-    background: ${({ theme }) => theme.colors.surfaceAlt};
-  }
-`;
-
-const CollapsedText = styled.span`
-  writing-mode: vertical-rl;
-  font-size: ${({ theme }) => theme.font.sizeSm};
-  font-weight: ${({ theme }) => theme.font.weightBold};
-  letter-spacing: 2px;
-`;
 
 const Header = styled.header`
   display: flex;

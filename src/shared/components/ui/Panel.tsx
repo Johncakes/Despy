@@ -66,12 +66,15 @@ const Header = styled.header`
 const Title = styled.div`
   font-weight: ${({ theme }) => theme.font.weightBold};
   font-size: ${({ theme }) => theme.font.sizeMd};
+  flex-shrink: 0;
+  white-space: nowrap;
 `;
 
 const Actions = styled.div`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.sm};
+  min-width: 0;
 `;
 
 const Body = styled.div<{ $flush: boolean }>`
