@@ -1,4 +1,4 @@
-# 🚀 despy (Despy)
+# Despy
 
 > **Agentic Coding Evaluation Platform**  
 > 🏆 **2026 Hackathon - Winner of the Encouragement Award (장려상)**
